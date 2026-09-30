@@ -27,7 +27,8 @@ veille-metiers-en-tension/
 ├── n8n/                       ← le COMMENT : les workflows, gérés avec n8ncli
 │   ├── config/                (configuration du CLI, standards de nommage, mise en page)
 │   └── workflows/
-│       └── Job Market Watch.workflow.ts
+│       ├── Job Market Watch.workflow.ts   (veille métiers en tension)
+│       └── Book Chatbot RAG.workflow.ts   (chatbot RAG sur un livre)
 ├── skills/                    ← les skills IA utilisés pendant le projet
 │   ├── interview/
 │   ├── doubt-driven-development/
@@ -44,10 +45,26 @@ veille-metiers-en-tension/
 | Workflow | Rôle | Déclencheurs | Statut |
 |---|---|---|---|
 | **Job Market Watch** | Collecte, calcul des indicateurs, rapport | Chaque lundi à 7h + formulaire manuel (1 métier, 1 zone) | 🟡 Étape 1 sur 7 |
+| **Book Chatbot RAG** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
 
 Les workflows sont écrits en TypeScript (format `@n8n/workflow-sdk`) et synchronisés avec l'instance n8n Cloud par le CLI **n8ncli**. Le fichier `.workflow.ts` est la sauvegarde versionnée du workflow : il peut être renvoyé dans n8n à tout moment avec `n8ncli push`, même après la fin de l'essai gratuit.
 
-### Avancement
+### Book Chatbot RAG
+
+Un workflow, deux parties, chacune encadrée sur la toile n8n et documentée par une sticky note bleue (specs) :
+
+| Partie | Déclencheur | Étapes |
+|---|---|---|
+| **1. Ingestion** | *On Form Submission* (dépôt du PDF, titre, auteur) | **Extraction** du texte → **Chunking** (passages de 800 caractères, chevauchement 150) → **Cleaning** (césures, numéros de page, sommaire et index retirés) → **Augmentation** (en-tête livre, auteur, chapitre, position, mots-clés) → **Vectorisation** (embeddings Google Gemini, Simple Vector Store) |
+| **2. Answering** | *When Chat Message Received* | **Input** (nettoyage de la question) → **Selection** (Gemini reformule la question en requête de recherche) → **Recherche** (12 passages les plus proches) → **Reranking** (score sémantique + mots communs, doublons retirés, 4 passages gardés) → **Génération** (Gemini répond uniquement à partir des passages, avec citations [1], [2]) |
+
+Choix principaux :
+- **Modèles** : Google Gemini Chat Model (réponse), un modèle Gemini léger (reformulation), Embeddings Google Gemini (`gemini-embedding-001`).
+- **Réglages** regroupés dans deux nœuds *Configuration* en tête de chaque partie (taille des passages, nombre de résultats, mode test avec `maxChunks`).
+- **Garde-fous** : réponse limitée aux passages du livre, « je ne trouve pas cette information » si rien ne correspond, instructions contenues dans le livre ou la question ignorées, retry sur chaque appel à Gemini.
+- **Limite connue** : le Simple Vector Store est en mémoire ; après un redémarrage de n8n, il faut réindexer le livre. Les améliorations prévues sont listées dans la sticky note verte.
+
+### Avancement de Job Market Watch
 
 | # | Étape | Statut |
 |---|---|---|
@@ -87,7 +104,8 @@ Un skill est une méthode écrite que l'assistant IA (Claude) applique quand la 
 - Chaque chiffre cité par l'IA est comparé aux données calculées ; en cas d'écart, la ligne est marquée « non vérifié ».
 
 **Conventions (cours n8n Eugenia)**
-- Workflows et nœuds en Title Case, variables et clés JSON en camelCase.
+- Workflows et nœuds en Title Case, au format « Outil - Action » (ex. `Gemini - Generate Answer`), variables et clés JSON en camelCase.
+- Nœud *Configuration* en tête de flux et sticky notes selon le code couleur du cours (bleu specs, gris blocs, vert améliorations). Appliqué à *Book Chatbot RAG* ; mise en conformité de *Job Market Watch* prévue à l'étape 2.
 - Retry automatique (3 tentatives) sur chaque appel externe.
 - Messages de commit préfixés : `init:`, `feat:`, `fix:`, `chore:`.
 - Chaque workflow est vérifié avec `n8ncli validate --lint` avant d'être envoyé.
@@ -99,10 +117,12 @@ Un skill est une méthode écrite que l'assistant IA (Claude) applique quand la 
 ```
 n8ncli pull                                              # récupérer la version en ligne
 n8ncli validate --lint                                   # vérifier les workflows
-n8ncli push "n8n/workflows/Job Market Watch.workflow.ts" # envoyer vers n8n
+n8ncli push "n8n/workflows/Job Market Watch.workflow.ts" # envoyer un workflow vers n8n
 ```
 
-**Pour tester dans n8n :** ouvrir *Job Market Watch*, relier les nœuds Google Sheets au classeur, puis lancer le formulaire manuel (1 métier, 1 zone) ou le déclencheur hebdomadaire (8 couples).
+**Tester Job Market Watch :** relier les nœuds Google Sheets au classeur, puis lancer le formulaire manuel (1 métier, 1 zone) ou le déclencheur hebdomadaire (8 couples).
+
+**Tester Book Chatbot RAG :** créer le credential *Google Gemini API Key*, déposer un PDF via le formulaire, puis poser des questions dans le chat n8n.
 
 **Arrêt d'urgence :** désactiver le workflow dans n8n (bouton *Active*) ou `n8ncli unpublish "n8n/workflows/Job Market Watch.workflow.ts"`.
 
