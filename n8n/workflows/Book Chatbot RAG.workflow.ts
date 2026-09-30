@@ -70,7 +70,7 @@ const on_Form_Submission = trigger({
     parameters: {
       authentication: 'none',
       formTitle: 'Ajouter un livre au chatbot',
-      formDescription: 'Dépose le PDF d\'un livre de non-fiction dont tu as le droit d\'utiliser le contenu. L\'indexation remplace le livre précédent.',
+      formDescription: 'Dépose le PDF d\'un document de non-fiction (livre, rapport, texte de loi) dont tu as le droit d\'utiliser le contenu. L\'indexation remplace le livre précédent.',
       formFields: {
         values: [
           { fieldLabel: 'Fichier PDF', fieldName: 'bookFile', fieldType: 'file', requiredField: true, multipleFiles: false, acceptFileTypes: '.pdf' },
@@ -139,11 +139,43 @@ if (text.trim().length === 0) {
 
 const size = cfg.chunkSize;
 const overlap = cfg.chunkOverlap;
-const headingPattern = /^(chapter|chapitre|part|partie|introduction|conclusion|epilogue|prologue|preface)\\b.{0,80}$/i;
+// Headings: level 1 = chapter / annex / preamble, level 2 = article. The next line is used as the title.
+const level1 = /^(chapitre|chapter|annexe|annex|partie|part)\\s+([IVXLC]+|\\d+)$|^(introduction|conclusion|epilogue|prologue|preface|préface)\\b.{0,60}$/i;
+const level2 = /^article\\s+(premier|\\d+)$/i;
+const preamble = /^considérant ce qui suit/i;
+
+const lines = text.split('\\n');
+const headings = [];
+let pos = 0;
+let current1 = '';
+for (let i = 0; i < lines.length; i++) {
+  const line = lines[i].trim();
+  const next = (lines[i + 1] || '').trim().slice(0, 90);
+  if (preamble.test(line)) {
+    current1 = 'Considérants';
+    headings.push({ pos, label: current1 });
+  } else if (level1.test(line)) {
+    current1 = line + (next && next.length > 3 ? ' - ' + next : '');
+    headings.push({ pos, label: current1 });
+  } else if (level2.test(line)) {
+    headings.push({ pos, label: (current1 ? current1 + ' > ' : '') + line + (next ? ' - ' + next : '') });
+  }
+  pos += lines[i].length + 1;
+}
+const labelFor = (from, to) => {
+  let active = '';
+  const inside = [];
+  for (const h of headings) {
+    if (h.pos <= from) active = h.label;
+    else if (h.pos < to) inside.push(h.label);
+  }
+  const all = [active, ...inside].filter(Boolean);
+  // Keep the most specific labels only (an article label already contains its chapter).
+  return all.filter((l, i) => !all.some((o, j) => j !== i && o !== l && o.startsWith(l))).filter((l, i, a) => a.indexOf(l) === i).join(' | ').slice(0, 300);
+};
 
 const chunks = [];
 let start = 0;
-let currentChapter = '';
 while (start < text.length) {
   let end = Math.min(start + size, text.length);
   if (end < text.length) {
@@ -151,13 +183,11 @@ while (start < text.length) {
     const cut = Math.max(window.lastIndexOf('\\n\\n'), window.lastIndexOf('. '));
     if (cut > size * 0.5) end = start + cut + 1;
   }
-  const raw = text.slice(start, end);
-  for (const line of raw.split('\\n')) {
-    if (headingPattern.test(line.trim())) currentChapter = line.trim();
-  }
-  chunks.push({ chunkIndex: chunks.length, rawText: raw, chapter: currentChapter });
+  chunks.push({ chunkIndex: chunks.length, rawText: text.slice(start, end), chapter: labelFor(start, end) });
   if (end >= text.length) break;
   start = Math.max(end - overlap, start + 1);
+  const lineStart = text.indexOf('\\n', start);
+  if (lineStart !== -1 && lineStart < end) start = lineStart + 1; // start on a full line, never mid-word
 }
 
 const limited = cfg.maxChunks > 0 ? chunks.slice(0, cfg.maxChunks) : chunks;
@@ -180,6 +210,9 @@ const cfg = $('Configuration - Ingestion').first().json;
 const out = [];
 for (const item of $input.all()) {
   let t = item.json.rawText;
+  t = t.replace(/^.*\\bJO L du \\d{1,2}\\.\\d{1,2}\\.\\d{4}.*$/gm, '');       // running page header of the Official Journal
+  t = t.replace(/^(\\d+\\/\\d+ )?ELI: http\\S+( \\d+\\/\\d+)?$/gm, '');          // page footer with page number
+  t = t.replace(/\\(\\s*\\n\\s*\\d{1,3}\\s*\\n?\\s*\\)/g, '');                  // footnote markers such as (12)
   t = t.replace(/(\\w)-\\n(\\w)/g, '$1$2');            // words cut by a hyphen at line end
   t = t.replace(/^\\s*\\d{1,4}\\s*$/gm, '');            // lone page numbers
   t = t.replace(/[\\u00AD\\u200B\\uFEFF]/g, '');        // invisible characters
@@ -187,7 +220,7 @@ for (const item of $input.all()) {
   t = t.replace(/\\s*\\n\\s*/g, ' ').trim();           // line breaks inside paragraphs
   const letters = (t.match(/\\p{L}/gu) || []).length;
   if (t.length < cfg.minChunkLength) continue;        // too short
-  if (letters / t.length < 0.6) continue;              // mostly numbers or dots (table of contents, index)
+  if (letters / t.length < 0.5) continue;              // mostly numbers or dots (table of contents, index)
   out.push({ json: { chunkIndex: item.json.chunkIndex, chapter: item.json.chapter, cleanText: t } });
 }
 if (out.length === 0) throw new Error('Aucun passage exploitable après nettoyage.');
@@ -219,7 +252,7 @@ return items.map((item, i) => {
   for (const w of words) if (!stopwords.has(w)) counts[w] = (counts[w] || 0) + 1;
   const keywords = Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 6).map(e => e[0]);
   const chapter = item.json.chapter || 'non identifié';
-  const header = 'Livre : ' + bookTitle + ' | Auteur : ' + bookAuthor + ' | Chapitre : ' + chapter + ' | Passage ' + (i + 1) + '/' + total + ' | Mots-clés : ' + keywords.join(', ');
+  const header = 'Livre : ' + bookTitle + ' | Auteur : ' + bookAuthor + ' | Section : ' + chapter + ' | Passage ' + (i + 1) + '/' + total + ' | Mots-clés : ' + keywords.join(', ');
   return { json: {
     bookTitle, bookAuthor, chapter, keywords,
     passageNumber: i + 1,
@@ -471,13 +504,13 @@ for (const c of candidates) {
   if (kept.length >= cfg.passagesKept) break;
 }
 
-const context = kept.map((k, i) => '[' + (i + 1) + '] (chapitre : ' + (k.metadata.chapter || 'non identifié') + ', passage ' + k.metadata.passageNumber + ')\\n' + k.text).join('\\n\\n---\\n\\n');
+const context = kept.map((k, i) => '[' + (i + 1) + '] (section : ' + (k.metadata.chapter || 'non identifiée') + ', passage ' + k.metadata.passageNumber + ')\\n' + k.text).join('\\n\\n---\\n\\n');
 return [{ json: {
   question,
   passagesFound: kept.length,
   context,
   sources: kept.map((k, i) => ({ ref: i + 1, chapter: k.metadata.chapter, passageNumber: k.metadata.passageNumber, score: Number(k.finalScore.toFixed(3)) })),
-  sourcesText: kept.length ? '\\n\\n**Sources :** ' + kept.map((k, i) => '[' + (i + 1) + '] ' + (k.metadata.chapter || 'chapitre non identifié') + ', passage ' + k.metadata.passageNumber).join(' ; ') : ''
+  sourcesText: kept.length ? '\\n\\n**Sources :** ' + kept.map((k, i) => '[' + (i + 1) + '] ' + (k.metadata.chapter || 'section non identifiée') + ', passage ' + k.metadata.passageNumber).join(' ; ') : ''
 } }];`
     },
     position: [1140, 440],
