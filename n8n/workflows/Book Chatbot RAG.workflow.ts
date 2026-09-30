@@ -353,7 +353,7 @@ const when_Chat_Message_Received = trigger({
     name: 'When Chat Message Received',
     parameters: { public: false, options: { responseMode: 'lastNode' } },
     position: [0, 440],
-    webhookId: '5b6c7d8e-9f0a-4b1c-8d2e-3f4a5b6c7d8e',
+    webhookId: '73c670fd-2a52-497e-bf51-fdca663c87f7',
     notes: 'Receives the user question from the n8n chat.',
     notesInFlow: true
   }
