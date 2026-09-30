@@ -29,6 +29,8 @@ veille-metiers-en-tension/
 │   └── workflows/
 │       ├── Job Market Watch.workflow.ts   (veille métiers en tension)
 │       └── Book Chatbot RAG.workflow.ts   (chatbot RAG sur un livre)
+├── supabase/setup.sql         ← table vectorielle du chatbot RAG
+├── scripts/                   ← création des credentials sans les écrire dans le code
 ├── skills/                    ← les skills IA utilisés pendant le projet
 │   ├── interview/
 │   ├── doubt-driven-development/
@@ -55,14 +57,15 @@ Un workflow, deux parties, chacune encadrée sur la toile n8n et documentée par
 
 | Partie | Déclencheur | Étapes |
 |---|---|---|
-| **1. Ingestion** | *On Form Submission* (dépôt du PDF, titre, auteur) | **Extraction** du texte → **Chunking** (passages de 800 caractères, chevauchement 150) → **Cleaning** (césures, numéros de page, sommaire et index retirés) → **Augmentation** (en-tête livre, auteur, chapitre, position, mots-clés) → **Vectorisation** (embeddings Google Gemini, Simple Vector Store) |
+| **1. Ingestion** | *On Form Submission* (dépôt du PDF, titre, auteur) | **Extraction** du texte → **Chunking** (passages de 800 caractères, chevauchement 150) → **Cleaning** (césures, numéros de page, sommaire et index retirés) → **Augmentation** (en-tête livre, auteur, chapitre, position, mots-clés) → **Vectorisation** (embeddings Google Gemini, stockage Supabase pgvector ; les anciens passages du même livre sont supprimés avant) |
 | **2. Answering** | *When Chat Message Received* | **Input** (nettoyage de la question) → **Selection** (Gemini reformule la question en requête de recherche) → **Recherche** (12 passages les plus proches) → **Reranking** (score sémantique + mots communs, doublons retirés, 4 passages gardés) → **Génération** (Gemini répond uniquement à partir des passages, avec citations [1], [2]) |
 
 Choix principaux :
-- **Modèles** : Google Gemini Chat Model (réponse), un modèle Gemini léger (reformulation), Embeddings Google Gemini (`gemini-embedding-001`).
+- **Modèles** : Google Gemini Chat Model (réponse) et un modèle léger (reformulation), `gemini-flash-latest` ; Embeddings Google Gemini `gemini-embedding-2` (3072 dimensions), le même pour l'indexation et la recherche.
+- **Stockage** : Supabase (pgvector), table `documents` et fonction `match_documents`, créées par [supabase/setup.sql](supabase/setup.sql).
 - **Réglages** regroupés dans deux nœuds *Configuration* en tête de chaque partie (taille des passages, nombre de résultats, mode test avec `maxChunks`).
 - **Garde-fous** : réponse limitée aux passages du livre, « je ne trouve pas cette information » si rien ne correspond, instructions contenues dans le livre ou la question ignorées, retry sur chaque appel à Gemini.
-- **Limite connue** : le Simple Vector Store est en mémoire ; après un redémarrage de n8n, il faut réindexer le livre. Les améliorations prévues sont listées dans la sticky note verte.
+- **Limite connue** : pas d'index vectoriel (pgvector limite HNSW à 2000 dimensions) ; suffisant pour quelques livres. Les améliorations prévues sont listées dans la sticky note verte.
 
 ### Avancement de Job Market Watch
 
@@ -122,7 +125,9 @@ n8ncli push "n8n/workflows/Job Market Watch.workflow.ts" # envoyer un workflow v
 
 **Tester Job Market Watch :** relier les nœuds Google Sheets au classeur, puis lancer le formulaire manuel (1 métier, 1 zone) ou le déclencheur hebdomadaire (8 couples).
 
-**Tester Book Chatbot RAG :** créer le credential *Google Gemini API Key*, déposer un PDF via le formulaire, puis poser des questions dans le chat n8n.
+**Tester Book Chatbot RAG :** exécuter [supabase/setup.sql](supabase/setup.sql) dans Supabase, créer les credentials Gemini et Supabase dans n8n, déposer un PDF via le formulaire, puis poser des questions dans le chat n8n.
+
+**Secrets :** copier [.env.example](.env.example) en `.env` (ignoré par git). [scripts/create_gemini_credential.sh](scripts/create_gemini_credential.sh) crée le credential Gemini via l'API n8n quand elle est disponible (offres payantes).
 
 **Arrêt d'urgence :** désactiver le workflow dans n8n (bouton *Active*) ou `n8ncli unpublish "n8n/workflows/Job Market Watch.workflow.ts"`.
 
