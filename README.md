@@ -28,7 +28,7 @@ veille-metiers-en-tension/
 │   ├── config/                (configuration du CLI, standards de nommage, mise en page)
 │   └── workflows/
 │       ├── Job Market Watch.workflow.ts   (veille métiers en tension)
-│       └── Book Chatbot RAG V8.workflow.ts   (chatbot RAG sur un livre)
+│       └── Book Chatbot RAG V9.workflow.ts   (chatbot RAG sur un livre)
 ├── supabase/setup.sql         ← table vectorielle du chatbot RAG
 ├── scripts/                   ← création des credentials sans les écrire dans le code
 ├── skills/                    ← les skills IA utilisés pendant le projet
@@ -47,11 +47,11 @@ veille-metiers-en-tension/
 | Workflow | Rôle | Déclencheurs | Statut |
 |---|---|---|---|
 | **Job Market Watch** | Collecte, calcul des indicateurs, rapport | Chaque lundi à 7h + formulaire manuel (1 métier, 1 zone) | 🟡 Étape 1 sur 7 |
-| **Book Chatbot RAG V8** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
+| **Book Chatbot RAG V9** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
 
 Les workflows sont écrits en TypeScript (format `@n8n/workflow-sdk`) et synchronisés avec l'instance n8n Cloud par le CLI **n8ncli**. Le fichier `.workflow.ts` est la sauvegarde versionnée du workflow : il peut être renvoyé dans n8n à tout moment avec `n8ncli push`, même après la fin de l'essai gratuit.
 
-### Book Chatbot RAG V8
+### Book Chatbot RAG V9
 
 Un workflow, deux parties. Chaque étape est encadrée par une sticky note grise sur la toile n8n, et une sticky note bleue décrit les specs.
 
