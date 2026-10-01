@@ -6,7 +6,7 @@ const specs_Note = node({
   config: {
     name: 'Specs Note',
     parameters: {
-      content: '## Book Chatbot RAG\n\n**Goal:** chat with a non-fiction book (PDF).\n\n**Part 1 - Ingestion** (form): extraction > chunking > cleaning > augmentation > vectorisation.\n\n**Part 2 - Answering** (chat): input > selection > search > reranking > generation.\n\n**Models:** Google Gemini chat model and Google Gemini embeddings.\n\n**Store:** Supabase (pgvector), table documents and function match_documents (see supabase/setup.sql). Re-ingesting a book replaces its passages.\n\n**Emergency stop:** deactivate the workflow.',
+      content: '## Book Chatbot RAG (Supabase)\n\n**Goal:** chat with a non-fiction book (PDF).\n\n**Part 1 - Ingestion** (form): extraction > chunking > cleaning > augmentation > vectorisation.\n\n**Part 2 - Answering** (chat): input > selection > search > reranking > generation.\n\n**Models:** Google Gemini chat model and Google Gemini embeddings.\n\n**Store:** Supabase (pgvector), table documents and function match_documents (see supabase/setup.sql). Re-ingesting a book replaces its passages.\n\n**Emergency stop:** deactivate the workflow.',
       height: 420,
       width: 460,
       color: 2
@@ -667,7 +667,7 @@ const format_Chat_Reply = node({
 
 // ─────────────────────────────── Workflow ───────────────────────────────
 
-const wf = workflow('Book Chatbot RAG', 'Book Chatbot RAG', {
+const wf = workflow('Book Chatbot RAG (Supabase)', 'Book Chatbot RAG (Supabase)', {
   description: 'Chatbot that answers questions about a non-fiction book (PDF) with retrieval-augmented generation. Part 1 ingests the book through a form (extraction, chunking, cleaning, augmentation, vectorisation into Supabase). Part 2 answers chat messages (input, selection, search, reranking, generation) with Google Gemini.',
   executionOrder: 'v1'
 });

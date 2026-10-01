@@ -28,7 +28,7 @@ veille-metiers-en-tension/
 │   ├── config/                (configuration du CLI, standards de nommage, mise en page)
 │   └── workflows/
 │       ├── Job Market Watch.workflow.ts   (veille métiers en tension)
-│       └── Book Chatbot RAG.workflow.ts   (chatbot RAG sur un livre)
+│       └── Book Chatbot RAG (Supabase).workflow.ts   (chatbot RAG sur un livre)
 ├── supabase/setup.sql         ← table vectorielle du chatbot RAG
 ├── scripts/                   ← création des credentials sans les écrire dans le code
 ├── skills/                    ← les skills IA utilisés pendant le projet
@@ -47,11 +47,11 @@ veille-metiers-en-tension/
 | Workflow | Rôle | Déclencheurs | Statut |
 |---|---|---|---|
 | **Job Market Watch** | Collecte, calcul des indicateurs, rapport | Chaque lundi à 7h + formulaire manuel (1 métier, 1 zone) | 🟡 Étape 1 sur 7 |
-| **Book Chatbot RAG** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
+| **Book Chatbot RAG (Supabase)** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
 
 Les workflows sont écrits en TypeScript (format `@n8n/workflow-sdk`) et synchronisés avec l'instance n8n Cloud par le CLI **n8ncli**. Le fichier `.workflow.ts` est la sauvegarde versionnée du workflow : il peut être renvoyé dans n8n à tout moment avec `n8ncli push`, même après la fin de l'essai gratuit.
 
-### Book Chatbot RAG
+### Book Chatbot RAG (Supabase)
 
 Un workflow, deux parties, chacune encadrée sur la toile n8n et documentée par une sticky note bleue (specs) :
 
@@ -128,6 +128,8 @@ n8ncli push "n8n/workflows/Job Market Watch.workflow.ts" # envoyer un workflow v
 **Tester Book Chatbot RAG :** exécuter [supabase/setup.sql](supabase/setup.sql) dans Supabase, créer les credentials Gemini et Supabase dans n8n, déposer un PDF via le formulaire, puis poser des questions dans le chat n8n.
 
 **Secrets :** copier [.env.example](.env.example) en `.env` (ignoré par git). [scripts/create_gemini_credential.sh](scripts/create_gemini_credential.sh) crée le credential Gemini via l'API n8n quand elle est disponible (offres payantes).
+
+**Limite de n8ncli sans clé API :** sans clé API n8n (absente de l'essai gratuit) ni accès à la base n8n, `n8ncli push` **crée** bien un nouveau workflow mais **ne modifie pas** un workflow existant (il ne met à jour que son nom tout en affichant « UPDATED »). Une modification se publie donc sous un nouveau nom, puis on vérifie avec `n8ncli pull` que le contenu en ligne est le bon.
 
 **Arrêt d'urgence :** désactiver le workflow dans n8n (bouton *Active*) ou `n8ncli unpublish "n8n/workflows/Job Market Watch.workflow.ts"`.
 
