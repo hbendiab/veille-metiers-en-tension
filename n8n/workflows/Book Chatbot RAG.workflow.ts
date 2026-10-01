@@ -23,7 +23,7 @@ const ingestion_Group = node({
     parameters: {
       content: '## Part 1 - Ingestion\nExtraction > Chunking > Cleaning > Augmentation > Vectorisation',
       height: 560,
-      width: 2320,
+      width: 2540,
       color: 7
     },
     position: [-60, -420]
@@ -70,7 +70,7 @@ const on_Form_Submission = trigger({
     parameters: {
       authentication: 'none',
       formTitle: 'Ajouter un livre au chatbot',
-      formDescription: 'Dépose le PDF d\'un document de non-fiction (livre, rapport, texte de loi) dont tu as le droit d\'utiliser le contenu. L\'indexation remplace le livre précédent.',
+      formDescription: 'Dépose le PDF d\'un document de non-fiction (livre, rapport, texte de loi) dont tu as le droit d\'utiliser le contenu. Renvoyer un livre déjà indexé (même titre) remplace ses passages.',
       formFields: {
         values: [
           { fieldLabel: 'Fichier PDF', fieldName: 'bookFile', fieldType: 'file', requiredField: true, multipleFiles: false, acceptFileTypes: '.pdf' },
@@ -274,7 +274,7 @@ const gemini_Embeddings_Ingestion = node({
     name: 'Google Gemini - Embed Passages',
     parameters: { modelName: 'models/gemini-embedding-2' },
     credentials: { googlePalmApi: newCredential('Google Gemini(PaLM) Api account', 'bk7GvyBH6j4OZcT1') },
-    position: [1700, 20]
+    position: [1920, 20]
   }
 });
 
@@ -299,7 +299,51 @@ const default_Data_Loader = node({
         }
       }
     },
-    position: [1860, 20]
+    position: [2080, 20]
+  }
+});
+
+const postgres_Ensure_Vector_Table = node({
+  type: 'n8n-nodes-base.postgres',
+  version: 2.7,
+  config: {
+    name: 'Postgres - Ensure Vector Table',
+    parameters: {
+      operation: 'executeQuery',
+      query: `-- Creates the vector table and the search function if they do not exist yet (same as supabase/setup.sql).
+DO $setup$
+BEGIN
+  EXECUTE 'create extension if not exists vector';
+  EXECUTE 'create table if not exists documents (id bigserial primary key, content text, metadata jsonb, embedding vector(3072))';
+  EXECUTE 'create index if not exists documents_book_id_idx on documents ((metadata->>''bookId''))';
+  EXECUTE 'alter table documents enable row level security';
+  EXECUTE $fn$
+    create or replace function match_documents (query_embedding vector(3072), match_count int default null, filter jsonb default '{}')
+    returns table (id bigint, content text, metadata jsonb, similarity float)
+    language plpgsql as $body$
+    begin
+      return query
+      select documents.id, documents.content, documents.metadata, 1 - (documents.embedding <=> query_embedding) as similarity
+      from documents
+      where documents.metadata @> filter
+      order by documents.embedding <=> query_embedding
+      limit match_count;
+    end;
+    $body$;
+  $fn$;
+END
+$setup$;`,
+      options: {}
+    },
+    credentials: { postgres: newCredential('Postgres account', 'AAsHauLCknL0ZLaC') },
+    executeOnce: true,
+    alwaysOutputData: true,
+    retryOnFail: true,
+    maxTries: 3,
+    waitBetweenTries: 3000,
+    position: [1320, -200],
+    notes: 'Creates the Supabase vector table and search function if missing, so the store is always ready.',
+    notesInFlow: true
   }
 });
 
@@ -313,7 +357,7 @@ const supabase_Delete_Previous = node({
       operation: 'delete',
       tableId: expr('{{ $(\'Configuration - Ingestion\').first().json.tableName }}'),
       filterType: 'string',
-      filterString: expr('metadata->>bookId=eq.{{ $json.bookId }}')
+      filterString: expr('metadata->>bookId=eq.{{ $(\'Augment Chunks\').first().json.bookId }}')
     },
     credentials: { supabaseApi: newCredential('Supabase account', 'jd9iIXvhm8NntJ4J') },
     executeOnce: true,
@@ -321,7 +365,7 @@ const supabase_Delete_Previous = node({
     retryOnFail: true,
     maxTries: 3,
     waitBetweenTries: 3000,
-    position: [1320, -200],
+    position: [1540, -200],
     notes: 'Removes the passages of this book already stored, so a re-ingestion never creates duplicates.',
     notesInFlow: true
   }
@@ -336,7 +380,7 @@ const restore_Passages = node({
       jsCode: `// Passes the augmented passages on again after the delete step, which only outputs deleted rows.
 return $('Augment Chunks').all();`
     },
-    position: [1540, -200],
+    position: [1760, -200],
     notes: 'Gives the augmented passages back to the vector store after the delete step.',
     notesInFlow: true
   }
@@ -357,7 +401,7 @@ const vector_Store_Insert = vectorStore({
     retryOnFail: true,
     maxTries: 3,
     waitBetweenTries: 5000,
-    position: [1760, -200],
+    position: [1980, -200],
     notes: 'Vectorisation: embeds every passage with Gemini and stores it in Supabase (pgvector).',
     notesInFlow: true,
     subnodes: { embedding: gemini_Embeddings_Ingestion, documentLoader: default_Data_Loader }
@@ -379,7 +423,7 @@ return [{ json: {
   table: $('Configuration - Ingestion').first().json.tableName
 } }];`
     },
-    position: [1980, -200],
+    position: [2200, -200],
     executeOnce: true,
     notes: 'Builds a short summary of the ingestion (book, number of passages).',
     notesInFlow: true
@@ -639,6 +683,7 @@ export default wf
   .to(chunk_Text)
   .to(clean_Chunks)
   .to(augment_Chunks)
+  .to(postgres_Ensure_Vector_Table)
   .to(supabase_Delete_Previous)
   .to(restore_Passages)
   .to(vector_Store_Insert)
