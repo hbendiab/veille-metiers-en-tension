@@ -28,7 +28,7 @@ veille-metiers-en-tension/
 │   ├── config/                (configuration du CLI, standards de nommage, mise en page)
 │   └── workflows/
 │       ├── Job Market Watch.workflow.ts   (veille métiers en tension)
-│       └── Book Chatbot RAG V2.workflow.ts   (chatbot RAG sur un livre)
+│       └── Book Chatbot RAG V3.workflow.ts   (chatbot RAG sur un livre)
 ├── supabase/setup.sql         ← table vectorielle du chatbot RAG
 ├── scripts/                   ← création des credentials sans les écrire dans le code
 ├── skills/                    ← les skills IA utilisés pendant le projet
@@ -47,17 +47,17 @@ veille-metiers-en-tension/
 | Workflow | Rôle | Déclencheurs | Statut |
 |---|---|---|---|
 | **Job Market Watch** | Collecte, calcul des indicateurs, rapport | Chaque lundi à 7h + formulaire manuel (1 métier, 1 zone) | 🟡 Étape 1 sur 7 |
-| **Book Chatbot RAG V2** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
+| **Book Chatbot RAG V3** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
 
 Les workflows sont écrits en TypeScript (format `@n8n/workflow-sdk`) et synchronisés avec l'instance n8n Cloud par le CLI **n8ncli**. Le fichier `.workflow.ts` est la sauvegarde versionnée du workflow : il peut être renvoyé dans n8n à tout moment avec `n8ncli push`, même après la fin de l'essai gratuit.
 
-### Book Chatbot RAG V2
+### Book Chatbot RAG V3
 
 Un workflow, deux parties, chacune encadrée sur la toile n8n et documentée par une sticky note bleue (specs) :
 
 | Partie | Déclencheur | Étapes |
 |---|---|---|
-| **1. Ingestion** | *On Form Submission* (dépôt du PDF, titre, auteur) | **Extraction** du texte → **Chunking** (passages de 800 caractères, chevauchement 150) → **Cleaning** (césures, numéros de page, sommaire et index retirés) → **Augmentation** (en-tête livre, auteur, chapitre, position, mots-clés) → **Vectorisation** (embeddings Google Gemini, stockage Supabase pgvector ; les anciens passages du même livre sont supprimés avant) |
+| **1. Ingestion** | *On Form Submission* (dépôt du PDF, titre, auteur) | **Extraction** du texte → **Chunking par IA en fenêtre glissante** (Gemini lit une fenêtre de 4000 caractères aux lignes numérotées et indique où commence chaque passage de sens — considérant, article, section ; la fenêtre repart de la dernière coupe ; plan de secours à taille fixe si la réponse est invalide) → **Cleaning** (césures, numéros de page, sommaire et index retirés) → **Augmentation** (en-tête livre, auteur, chapitre, position, mots-clés) → **Vectorisation** (embeddings Google Gemini, stockage Supabase pgvector ; les anciens passages du même livre sont supprimés avant) |
 | **2. Answering** | *When Chat Message Received* | **Input** (nettoyage de la question) → **Selection** (Gemini reformule la question en requête de recherche) → **Recherche** (12 passages les plus proches) → **Reranking** (score sémantique + mots communs, doublons retirés, 4 passages gardés) → **Génération** (Gemini répond uniquement à partir des passages, avec citations [1], [2]) |
 
 Choix principaux :
