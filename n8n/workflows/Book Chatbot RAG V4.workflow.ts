@@ -6,7 +6,7 @@ const specs_Note = node({
   config: {
     name: 'Specs Note',
     parameters: {
-      content: '## Book Chatbot RAG V3\n\n**Goal:** chat with a non-fiction book (PDF).\n\n**Part 1 - Ingestion** (form): extraction > AI rolling-window chunking (Gemini picks the cuts) > cleaning > augmentation > vectorisation.\n\n**Part 2 - Answering** (chat): input > selection > search > reranking > generation.\n\n**Models:** Google Gemini chat model and Google Gemini embeddings.\n\n**Store:** Supabase (pgvector), table documents and function match_documents (see supabase/setup.sql). Re-ingesting a book replaces its passages.\n\n**Emergency stop:** deactivate the workflow.',
+      content: '## Book Chatbot RAG V4\n\n**Goal:** chat with a non-fiction book (PDF).\n\n**Part 1 - Ingestion** (form): extraction > AI rolling-window chunking (Gemini picks the cuts) > cleaning > augmentation > vectorisation.\n\n**Part 2 - Answering** (chat): input > selection > search > reranking > generation.\n\n**Models:** Google Gemini chat model and Google Gemini embeddings.\n\n**Store:** Supabase (pgvector), table documents and function match_documents (see supabase/setup.sql). Re-ingesting a book replaces its passages.\n\n**Emergency stop:** deactivate the workflow.',
       height: 420,
       width: 460,
       color: 2
@@ -23,7 +23,7 @@ const ingestion_Group = node({
     parameters: {
       content: '## Part 1 - Ingestion\nExtraction > AI Rolling-Window Chunking > Cleaning > Augmentation > Vectorisation',
       height: 560,
-      width: 3720,
+      width: 3060,
       color: 7
     },
     position: [-60, -420]
@@ -97,6 +97,7 @@ const configuration_Ingestion = node({
       assignments: {
         assignments: [
           { id: 'cfg-table-name', name: 'tableName', value: 'documents', type: 'string' },
+          { id: 'cfg-book-id', name: 'bookId', value: expr('{{ String($json.bookTitle || \'\').normalize(\'NFD\').replace(/[\\u0300-\\u036f]/g, \'\').toLowerCase().replace(/[^a-z0-9]+/g, \'-\').replace(/^-|-$/g, \'\') || \'document\' }}'), type: 'string' },
           { id: 'cfg-window-size', name: 'windowSize', value: 4000, type: 'number' },
           { id: 'cfg-target-size', name: 'targetChunkSize', value: 1000, type: 'number' },
           { id: 'cfg-min-chunk', name: 'minChunkLength', value: 120, type: 'number' },
@@ -128,21 +129,24 @@ const extract_PDF_Text = node({
   }
 });
 
-const prepare_AI_Chunking = node({
-  type: 'n8n-nodes-base.code',
-  version: 2,
+const postgres_Prepare_Vector_Table = node({
+  type: 'n8n-nodes-base.postgres',
+  version: 2.7,
   config: {
-    name: 'Prepare AI Chunking',
+    name: 'Postgres - Prepare Vector Table',
     parameters: {
-      jsCode: `// Starts the rolling window at the beginning of the text.
-const text = String($input.first().json.text || '');
-if (text.trim().length === 0) {
-  throw new Error('PDF sans texte exploitable (scan ou image ?). Utiliser un PDF avec du texte sélectionnable.');
-}
-return [{ json: { offset: 0, cuts: [], iteration: 0, aiWindows: 0, fallbackWindows: 0, done: false } }];`
+      operation: 'executeQuery',
+      query: expr('-- Creates the vector table and search function if missing (same as supabase/setup.sql), then removes the passages of this book already stored.\n-- bookId only contains a-z, 0-9 and dashes (computed in Configuration - Ingestion), so it is safe in the SQL literal.\nDO $setup$\nBEGIN\n  EXECUTE \'create extension if not exists vector\';\n  EXECUTE \'create table if not exists documents (id bigserial primary key, content text, metadata jsonb, embedding vector(3072))\';\n  EXECUTE \'create index if not exists documents_book_id_idx on documents ((metadata->>\'\'bookId\'\'))\';\n  EXECUTE \'alter table documents enable row level security\';\n  EXECUTE $fn$\n    create or replace function match_documents (query_embedding vector(3072), match_count int default null, filter jsonb default \'{}\')\n    returns table (id bigint, content text, metadata jsonb, similarity float)\n    language plpgsql as $body$\n    begin\n      return query\n      select documents.id, documents.content, documents.metadata, 1 - (documents.embedding <=> query_embedding) as similarity\n      from documents\n      where documents.metadata @> filter\n      order by documents.embedding <=> query_embedding\n      limit match_count;\n    end;\n    $body$;\n  $fn$;\n  EXECUTE format(\'delete from documents where metadata->>\'\'bookId\'\' = %L\', \'{{ $(\'Configuration - Ingestion\').first().json.bookId }}\');\nEND\n$setup$;'),
+      options: {}
     },
+    credentials: { postgres: newCredential('Postgres account', 'AAsHauLCknL0ZLaC') },
+    executeOnce: true,
+    alwaysOutputData: true,
+    retryOnFail: true,
+    maxTries: 3,
+    waitBetweenTries: 3000,
     position: [660, -200],
-    notes: 'Chunking (AI rolling window): starts the window at the beginning of the text.',
+    notes: 'Creates the Supabase vector table if missing and deletes the passages of this book already stored, so a re-ingestion never creates duplicates.',
     notesInFlow: true
   }
 });
@@ -156,7 +160,12 @@ const build_Window = node({
       jsCode: `// Builds the next window: whole lines from the current offset, numbered for the model.
 const cfg = $('Configuration - Ingestion').first().json;
 const text = String($('Extract from File - PDF Text').first().json.text || '');
-const state = $input.first().json;
+// First pass: no state yet, the window starts at the beginning of the text.
+const input = $input.first().json;
+if (typeof input.offset !== 'number' && text.trim().length === 0) {
+  throw new Error('PDF sans texte exploitable (scan ou image ?). Utiliser un PDF avec du texte sélectionnable.');
+}
+const state = typeof input.offset === 'number' ? input : { offset: 0, cuts: [], iteration: 0, aiWindows: 0, fallbackWindows: 0, done: false };
 const start = state.offset;
 let end = Math.min(start + cfg.windowSize, text.length);
 if (end < text.length) {
@@ -177,7 +186,7 @@ for (const line of windowText.split('\\n')) {
 return [{ json: { ...state, windowStart: start, windowEnd: end, isLastWindow: end >= text.length, lineStarts, numberedText: numbered.join('\\n') } }];`
     },
     position: [880, -200],
-    notes: 'Takes the next window of whole lines from the current position and numbers the lines for Gemini.',
+    notes: 'Chunking (AI rolling window): takes the next window of whole lines from the current position (start of the text on the first pass) and numbers the lines for Gemini.',
     notesInFlow: true
   }
 });
@@ -426,7 +435,7 @@ const augment_Chunks = node({
 const form = $('On Form Submission').first().json;
 const bookTitle = String(form.bookTitle || form['Titre du livre'] || '').trim();
 const bookAuthor = String(form.bookAuthor || form['Auteur'] || '').trim();
-const bookId = bookTitle.normalize('NFD').replace(/[\\u0300-\\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'document';
+const bookId = $('Configuration - Ingestion').first().json.bookId;
 const stopwords = new Set(('the and for that with this from have are was were not but they their which what when into than then them there these those will would could should about also more most some such only other your its his her our des les une dans pour que qui par sur avec est sont pas plus mais comme aux ses ces leur leurs tout tous elle ils nous vous ont été être fait faire cette entre').split(' '));
 
 const items = $input.all();
@@ -458,7 +467,7 @@ const gemini_Embeddings_Ingestion = node({
     name: 'Google Gemini - Embed Passages',
     parameters: { modelName: 'models/gemini-embedding-2' },
     credentials: { googlePalmApi: newCredential('Google Gemini(PaLM) Api account', 'bk7GvyBH6j4OZcT1') },
-    position: [3240, 120]
+    position: [2580, 120]
   }
 });
 
@@ -468,7 +477,7 @@ const large_Text_Splitter = node({
   config: {
     name: 'Recursive Text Splitter - No Re-Split',
     parameters: { chunkSize: 4000, chunkOverlap: 0, options: {} },
-    position: [3560, 120]
+    position: [2900, 120]
   }
 });
 
@@ -493,91 +502,8 @@ const default_Data_Loader = node({
         }
       }
     },
-    position: [3400, 120],
+    position: [2740, 120],
     subnodes: { textSplitter: large_Text_Splitter }
-  }
-});
-
-const postgres_Ensure_Vector_Table = node({
-  type: 'n8n-nodes-base.postgres',
-  version: 2.7,
-  config: {
-    name: 'Postgres - Ensure Vector Table',
-    parameters: {
-      operation: 'executeQuery',
-      query: `-- Creates the vector table and the search function if they do not exist yet (same as supabase/setup.sql).
-DO $setup$
-BEGIN
-  EXECUTE 'create extension if not exists vector';
-  EXECUTE 'create table if not exists documents (id bigserial primary key, content text, metadata jsonb, embedding vector(3072))';
-  EXECUTE 'create index if not exists documents_book_id_idx on documents ((metadata->>''bookId''))';
-  EXECUTE 'alter table documents enable row level security';
-  EXECUTE $fn$
-    create or replace function match_documents (query_embedding vector(3072), match_count int default null, filter jsonb default '{}')
-    returns table (id bigint, content text, metadata jsonb, similarity float)
-    language plpgsql as $body$
-    begin
-      return query
-      select documents.id, documents.content, documents.metadata, 1 - (documents.embedding <=> query_embedding) as similarity
-      from documents
-      where documents.metadata @> filter
-      order by documents.embedding <=> query_embedding
-      limit match_count;
-    end;
-    $body$;
-  $fn$;
-END
-$setup$;`,
-      options: {}
-    },
-    credentials: { postgres: newCredential('Postgres account', 'AAsHauLCknL0ZLaC') },
-    executeOnce: true,
-    alwaysOutputData: true,
-    retryOnFail: true,
-    maxTries: 3,
-    waitBetweenTries: 3000,
-    position: [2420, -200],
-    notes: 'Creates the Supabase vector table and search function if missing, so the store is always ready.',
-    notesInFlow: true
-  }
-});
-
-const supabase_Delete_Previous = node({
-  type: 'n8n-nodes-base.supabase',
-  version: 1,
-  config: {
-    name: 'Supabase - Delete Previous Passages',
-    parameters: {
-      resource: 'row',
-      operation: 'delete',
-      tableId: expr('{{ $(\'Configuration - Ingestion\').first().json.tableName }}'),
-      filterType: 'string',
-      filterString: expr('metadata->>bookId=eq.{{ $(\'Augment Chunks\').first().json.bookId }}')
-    },
-    credentials: { supabaseApi: newCredential('Supabase account', 'jd9iIXvhm8NntJ4J') },
-    executeOnce: true,
-    alwaysOutputData: true,
-    retryOnFail: true,
-    maxTries: 3,
-    waitBetweenTries: 3000,
-    position: [2640, -200],
-    notes: 'Removes the passages of this book already stored, so a re-ingestion never creates duplicates.',
-    notesInFlow: true
-  }
-});
-
-const restore_Passages = node({
-  type: 'n8n-nodes-base.code',
-  version: 2,
-  config: {
-    name: 'Restore Augmented Passages',
-    parameters: {
-      jsCode: `// Passes the augmented passages on again after the delete step, which only outputs deleted rows.
-return $('Augment Chunks').all();`
-    },
-    position: [2860, -200],
-    notes: 'Gives the augmented passages back to the vector store after the delete step.',
-    notesInFlow: true
   }
 });
 
@@ -586,7 +512,7 @@ const loop_Over_Passages = splitInBatches({
   config: {
     name: 'Loop Over Passages',
     parameters: { batchSize: expr('{{ $(\'Configuration - Ingestion\').first().json.passagesPerBatch }}'), options: {} },
-    position: [3080, -200]
+    position: [2420, -200]
   }
 });
 
@@ -596,7 +522,7 @@ const wait_Gemini_Quota = node({
   config: {
     name: 'Wait - Gemini Quota',
     parameters: { resume: 'timeInterval', amount: expr('{{ $(\'Configuration - Ingestion\').first().json.pauseSeconds }}'), unit: 'seconds' },
-    position: [3520, -100],
+    position: [2860, -100],
     notes: 'Pause between batches so the free Gemini embedding quota is not exceeded.',
     notesInFlow: true
   }
@@ -617,34 +543,10 @@ const vector_Store_Insert = node({
     retryOnFail: true,
     maxTries: 3,
     waitBetweenTries: 5000,
-    position: [3300, -100],
+    position: [2640, -100],
     notes: 'Vectorisation: embeds every passage with Gemini and stores it in Supabase (pgvector).',
     notesInFlow: true,
     subnodes: { embedding: gemini_Embeddings_Ingestion, documentLoader: default_Data_Loader }
-  }
-});
-
-const build_Ingestion_Report = node({
-  type: 'n8n-nodes-base.code',
-  version: 2,
-  config: {
-    name: 'Build Ingestion Report',
-    parameters: {
-      jsCode: `// Summarises the ingestion run for the execution log.
-const augmented = $('Augment Chunks').all();
-return [{ json: {
-  status: 'indexed',
-  bookTitle: augmented[0]?.json.bookTitle || '',
-  passagesIndexed: augmented.length,
-  windowsCutByGemini: $('Slice AI Chunks').first().json.aiWindows,
-  windowsCutByFallback: $('Slice AI Chunks').first().json.fallbackWindows,
-  table: $('Configuration - Ingestion').first().json.tableName
-} }];`
-    },
-    position: [3300, -320],
-    executeOnce: true,
-    notes: 'Builds a short summary of the ingestion (book, number of passages).',
-    notesInFlow: true
   }
 });
 
@@ -885,7 +787,7 @@ const format_Chat_Reply = node({
 
 // ─────────────────────────────── Workflow ───────────────────────────────
 
-const wf = workflow('Book Chatbot RAG V3', 'Book Chatbot RAG V3', {
+const wf = workflow('Book Chatbot RAG V4', 'Book Chatbot RAG V4', {
   description: 'Chatbot that answers questions about a non-fiction book (PDF) with retrieval-augmented generation. Part 1 ingests the book through a form (extraction, chunking, cleaning, augmentation, vectorisation into Supabase). Part 2 answers chat messages (input, selection, search, reranking, generation) with Google Gemini.',
   executionOrder: 'v1'
 });
@@ -898,7 +800,7 @@ export default wf
   .add(on_Form_Submission)
   .to(configuration_Ingestion)
   .to(extract_PDF_Text)
-  .to(prepare_AI_Chunking)
+  .to(postgres_Prepare_Vector_Table)
   .to(build_Window)
   .to(find_Chunk_Boundaries)
   .to(apply_Chunk_Boundaries)
@@ -908,11 +810,8 @@ export default wf
   .add(slice_AI_Chunks)
   .to(clean_Chunks)
   .to(augment_Chunks)
-  .to(postgres_Ensure_Vector_Table)
-  .to(supabase_Delete_Previous)
-  .to(restore_Passages)
   .to(loop_Over_Passages
-    .onDone(build_Ingestion_Report)
+    .onDone(null)
     .onEachBatch(vector_Store_Insert.to(wait_Gemini_Quota.to(nextBatch(loop_Over_Passages)))))
   .add(when_Chat_Message_Received)
   .to(configuration_Answering)
