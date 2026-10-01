@@ -6,7 +6,7 @@ const specs_Note = node({
   config: {
     name: 'Specs Note',
     parameters: {
-      content: '## Book Chatbot RAG V5\n\n**Goal:** chat with a non-fiction book (PDF).\n\n**Part 1 - Ingestion** (form): extraction > AI rolling-window chunking (Gemini picks the cuts) > cleaning > augmentation > vectorisation.\n\n**Part 2 - Answering** (chat): input > selection > search > reranking > generation.\n\n**Models:** Google Gemini chat model and Google Gemini embeddings.\n\n**Store:** Supabase (pgvector), table documents and function match_documents (see supabase/setup.sql). Re-ingesting a book replaces its passages.\n\n**Emergency stop:** deactivate the workflow.',
+      content: '## Book Chatbot RAG V6\n\n**Goal:** chat with a non-fiction book (PDF).\n\n**Part 1 - Ingestion** (form): extraction > AI rolling-window chunking (Gemini picks the cuts) > cleaning > augmentation > vectorisation.\n\n**Part 2 - Answering** (chat): input > selection > search > reranking > generation.\n\n**Models:** Google Gemini chat model and Google Gemini embeddings.\n\n**Store:** Supabase (pgvector), table documents and function match_documents (see supabase/setup.sql). Re-ingesting a book replaces its passages.\n\n**Emergency stop:** deactivate the workflow.',
       height: 420,
       width: 460,
       color: 2
@@ -136,7 +136,7 @@ const postgres_Prepare_Vector_Table = node({
     name: 'Postgres - Prepare Vector Table',
     parameters: {
       operation: 'executeQuery',
-      query: expr('-- Creates the vector table and search function if missing (same as supabase/setup.sql), then removes the passages of this book already stored.\n-- bookId only contains a-z, 0-9 and dashes (computed in Configuration - Ingestion), so it is safe in the SQL literal.\nDO $setup$\nBEGIN\n  EXECUTE \'create extension if not exists vector\';\n  EXECUTE \'create table if not exists documents (id bigserial primary key, content text, metadata jsonb, embedding vector(3072))\';\n  EXECUTE \'create index if not exists documents_book_id_idx on documents ((metadata->>\'\'bookId\'\'))\';\n  EXECUTE \'alter table documents enable row level security\';\n  EXECUTE $fn$\n    create or replace function match_documents (query_embedding vector(3072), match_count int default null, filter jsonb default \'{}\')\n    returns table (id bigint, content text, metadata jsonb, similarity float)\n    language plpgsql as $body$\n    begin\n      return query\n      select documents.id, documents.content, documents.metadata, 1 - (documents.embedding <=> query_embedding) as similarity\n      from documents\n      where documents.metadata @> filter\n      order by documents.embedding <=> query_embedding\n      limit match_count;\n    end;\n    $body$;\n  $fn$;\n  EXECUTE format(\'delete from documents where metadata->>\'\'bookId\'\' = %L\', \'{{ $(\'Configuration - Ingestion\').first().json.bookId }}\');\nEND\n$setup$;'),
+      query: expr('-- Creates the vector table and search function if missing (same as supabase/setup.sql), then removes the passages of this book already stored.\n-- bookId only contains a-z, 0-9 and dashes (computed in Configuration - Ingestion), so it is safe in the SQL literal.\nDO $setup$\nBEGIN\n  EXECUTE \'create extension if not exists vector\';\n  EXECUTE \'create table if not exists documents (id bigserial primary key, content text, metadata jsonb, embedding vector(3072))\';\n  EXECUTE \'create index if not exists documents_book_id_idx on documents ((metadata->>\'\'bookId\'\'))\';\n  -- Keywords as a real column, computed by Postgres from the metadata (no extra n8n node, always in sync).\n  EXECUTE \'alter table documents add column if not exists keywords text[] generated always as (string_to_array(nullif(metadata->>\'\'keywords\'\', \'\'\'\'), \'\', \'\')) stored\';\n  EXECUTE \'create index if not exists documents_keywords_idx on documents using gin (keywords)\';\n  EXECUTE \'alter table documents enable row level security\';\n  EXECUTE $fn$\n    create or replace function match_documents (query_embedding vector(3072), match_count int default null, filter jsonb default \'{}\')\n    returns table (id bigint, content text, metadata jsonb, similarity float)\n    language plpgsql as $body$\n    begin\n      return query\n      select documents.id, documents.content, documents.metadata, 1 - (documents.embedding <=> query_embedding) as similarity\n      from documents\n      where documents.metadata @> filter\n      order by documents.embedding <=> query_embedding\n      limit match_count;\n    end;\n    $body$;\n  $fn$;\n  EXECUTE format(\'delete from documents where metadata->>\'\'bookId\'\' = %L\', \'{{ $(\'Configuration - Ingestion\').first().json.bookId }}\');\nEND\n$setup$;'),
       options: {}
     },
     credentials: { postgres: newCredential('Postgres account', 'AAsHauLCknL0ZLaC') },
@@ -497,7 +497,8 @@ const default_Data_Loader = node({
             { name: 'bookId', value: expr('{{ $json.bookId }}') },
             { name: 'bookTitle', value: expr('{{ $json.bookTitle }}') },
             { name: 'chapter', value: expr('{{ $json.chapter }}') },
-            { name: 'passageNumber', value: expr('{{ $json.passageNumber }}') }
+            { name: 'passageNumber', value: expr('{{ $json.passageNumber }}') },
+            { name: 'keywords', value: expr('{{ $json.keywords.join(", ") }}') }
           ]
         }
       }
@@ -787,7 +788,7 @@ const format_Chat_Reply = node({
 
 // ─────────────────────────────── Workflow ───────────────────────────────
 
-const wf = workflow('Book Chatbot RAG V5', 'Book Chatbot RAG V5', {
+const wf = workflow('Book Chatbot RAG V6', 'Book Chatbot RAG V6', {
   description: 'Chatbot that answers questions about a non-fiction book (PDF) with retrieval-augmented generation. Part 1 ingests the book through a form (extraction, chunking, cleaning, augmentation, vectorisation into Supabase). Part 2 answers chat messages (input, selection, search, reranking, generation) with Google Gemini.',
   executionOrder: 'v1'
 });

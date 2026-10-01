@@ -35,6 +35,16 @@ def fetch_rows(env):
     return rows
 
 
+def fetch_keywords(env):
+    """Returns the keywords column, or None if it does not exist yet."""
+    key = env["SUPABASE_SERVICE_ROLE_KEY"]
+    url = env["SUPABASE_URL"].rstrip("/") + "/rest/v1/documents?select=keywords&limit=5000"
+    out = subprocess.run(["curl", "-sS", "-H", "apikey: " + key, "-H", "Authorization: Bearer " + key, url],
+                         capture_output=True, text=True, check=True).stdout
+    rows = json.loads(out)
+    return rows if isinstance(rows, list) else None
+
+
 def vector_size(value):
     if isinstance(value, str):
         value = json.loads(value)
@@ -63,6 +73,15 @@ def main():
     print("\nSections reconnues :")
     for section, count in collections.Counter(r["metadata"].get("chapter") for r in rows).most_common(15):
         print(f"  {count:>4} × {str(section)[:110]}")
+
+    keyword_rows = fetch_keywords(load_env())
+    if keyword_rows is None:
+        print("\nColonne keywords : pas encore créée (elle le sera à la prochaine indexation)")
+    else:
+        filled = sum(1 for r in keyword_rows if r.get("keywords"))
+        print(f"\nColonne keywords : {filled}/{len(keyword_rows)} passages remplis")
+        for word, count in collections.Counter(w for r in keyword_rows for w in (r.get("keywords") or [])).most_common(8):
+            print(f"  {count:>4} × {word}")
 
     for r in rows[:show]:
         print(f"\n--- id {r['id']} | passage {r['metadata'].get('passageNumber')}")
