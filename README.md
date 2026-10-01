@@ -28,7 +28,7 @@ veille-metiers-en-tension/
 │   ├── config/                (configuration du CLI, standards de nommage, mise en page)
 │   └── workflows/
 │       ├── Job Market Watch.workflow.ts   (veille métiers en tension)
-│       └── Book Chatbot RAG V9.workflow.ts   (chatbot RAG sur un livre)
+│       └── Book Chatbot RAG V10.workflow.ts   (chatbot RAG sur un livre)
 ├── supabase/setup.sql         ← table vectorielle du chatbot RAG
 ├── scripts/                   ← création des credentials sans les écrire dans le code
 ├── skills/                    ← les skills IA utilisés pendant le projet
@@ -47,11 +47,11 @@ veille-metiers-en-tension/
 | Workflow | Rôle | Déclencheurs | Statut |
 |---|---|---|---|
 | **Job Market Watch** | Collecte, calcul des indicateurs, rapport | Chaque lundi à 7h + formulaire manuel (1 métier, 1 zone) | 🟡 Étape 1 sur 7 |
-| **Book Chatbot RAG V9** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
+| **Book Chatbot RAG V10** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
 
 Les workflows sont écrits en TypeScript (format `@n8n/workflow-sdk`) et synchronisés avec l'instance n8n Cloud par le CLI **n8ncli**. Le fichier `.workflow.ts` est la sauvegarde versionnée du workflow : il peut être renvoyé dans n8n à tout moment avec `n8ncli push`, même après la fin de l'essai gratuit.
 
-### Book Chatbot RAG V9
+### Book Chatbot RAG V10
 
 Un workflow, deux parties. Chaque étape est encadrée par une sticky note grise sur la toile n8n, et une sticky note bleue décrit les specs.
 
@@ -62,10 +62,14 @@ Un workflow, deux parties. Chaque étape est encadrée par une sticky note grise
 
 Choix principaux :
 - **Chunking récursif** plutôt que par IA : l'ancienne version (fenêtre glissante où Gemini choisissait les coupes) prenait plus d'une heure sur l'AI Act. Le découpage récursif est instantané. Testé sur l'AI Act : 99 passages, 96 entre 5000 et 10000 caractères ; les 3 autres font au moins 4665 caractères.
-- **Modèles** : nœuds natifs **Google Gemini → Message a Model**, sans sous-bulle de modèle :
-  - Gemini Flash Lite pour l'augmentation, le routing et le reranking, avec sortie JSON forcée ;
-  - Gemini Flash pour la réponse.
+- **Modèles** : nœuds natifs **Google Gemini → Message a Model**, sans sous-bulle de modèle, tous sur `gemini-3.5-flash-lite`.
+  - Mesure : environ 1 s par appel, contre 18 s pour `gemini-3.5-flash` qui « réfléchit » longtemps. `gemini-flash-latest` renvoyait des erreurs 503 (surcharge).
+  - La version est figée : un alias `-latest` a déjà changé de modèle sous nos pieds.
   - Les seules sous-bulles restantes sont les embeddings `gemini-embedding-2` (3072 dimensions, jusqu'à 8192 tokens), accrochés au Supabase Vector Store. n8n n'a pas de nœud natif d'embeddings, et un HTTP Request n'est utilisé que s'il n'existe aucune autre solution.
+- **Vitesse** :
+  - l'augmentation se fait en **un appel Gemini par lot de 8 passages** (environ 7 s, testé : 8 sur 8 enrichis), au lieu d'un appel par passage ;
+  - l'ingestion de l'AI Act prend environ 3 minutes ;
+  - une réponse dans le chat prend environ 5 secondes.
 - **Stockage** : Supabase (pgvector), créé par [supabase/setup.sql](supabase/setup.sql) :
   - table `documents` : `content` est le chunk, avec `embedding`, `keywords` et `metadata` (section, articles, contexte, entités, relations…) ;
   - table `chat_messages` : historique, purgé après 30 jours ;
@@ -74,7 +78,7 @@ Choix principaux :
 - **Réglages** : regroupés dans deux nœuds *Configuration*, un en tête de chaque partie (taille des chunks, overlap, nombre de résultats, seuil de reranking, mode test avec `maxChunks`).
 - **Quota Gemini gratuit** :
   - 1000 embeddings par jour et par modèle (vérifié : `EmbedContentRequestsPerDayPerProjectPerModel-FreeTier = 1000`) ;
-  - augmentation et vectorisation par paquets de 5 passages, avec 20 s de pause, soit environ 15 minutes pour l'AI Act.
+  - augmentation et vectorisation par paquets de 8 passages avec 5 s de pause. Si l'API renvoie 429, il faut augmenter `pauseSeconds`.
   - Si le quota est dépassé, l'API renvoie 429 et LangChain produit des vecteurs vides (« vector must have at least 1 dimension »).
 - **Garde-fous** :
   - réponse limitée aux passages du livre ;
