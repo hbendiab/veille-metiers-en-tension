@@ -28,7 +28,7 @@ veille-metiers-en-tension/
 │   ├── config/                (configuration du CLI, standards de nommage, mise en page)
 │   └── workflows/
 │       ├── Job Market Watch.workflow.ts   (veille métiers en tension)
-│       └── Book Chatbot RAG V7.workflow.ts   (chatbot RAG sur un livre)
+│       └── Book Chatbot RAG V8.workflow.ts   (chatbot RAG sur un livre)
 ├── supabase/setup.sql         ← table vectorielle du chatbot RAG
 ├── scripts/                   ← création des credentials sans les écrire dans le code
 ├── skills/                    ← les skills IA utilisés pendant le projet
@@ -47,11 +47,11 @@ veille-metiers-en-tension/
 | Workflow | Rôle | Déclencheurs | Statut |
 |---|---|---|---|
 | **Job Market Watch** | Collecte, calcul des indicateurs, rapport | Chaque lundi à 7h + formulaire manuel (1 métier, 1 zone) | 🟡 Étape 1 sur 7 |
-| **Book Chatbot RAG V7** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
+| **Book Chatbot RAG V8** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
 
 Les workflows sont écrits en TypeScript (format `@n8n/workflow-sdk`) et synchronisés avec l'instance n8n Cloud par le CLI **n8ncli**. Le fichier `.workflow.ts` est la sauvegarde versionnée du workflow : il peut être renvoyé dans n8n à tout moment avec `n8ncli push`, même après la fin de l'essai gratuit.
 
-### Book Chatbot RAG V7
+### Book Chatbot RAG V8
 
 Un workflow, deux parties. Chaque étape est encadrée par une sticky note grise sur la toile n8n, et une sticky note bleue décrit les specs.
 
@@ -62,10 +62,10 @@ Un workflow, deux parties. Chaque étape est encadrée par une sticky note grise
 
 Choix principaux :
 - **Chunking récursif** plutôt que par IA : l'ancienne version (fenêtre glissante où Gemini choisissait les coupes) prenait plus d'une heure sur l'AI Act. Le découpage récursif est instantané. Testé sur l'AI Act : 99 passages, 96 entre 5000 et 10000 caractères ; les 3 autres font au moins 4665 caractères.
-- **Modèles** :
-  - Gemini Flash Lite (`gemini-flash-lite-latest`) pour l'augmentation, le routing et le reranking ;
-  - Gemini Flash (`gemini-flash-latest`) pour la réponse ;
-  - `gemini-embedding-2` (3072 dimensions, jusqu'à 8192 tokens) pour l'indexation et la recherche. `gemini-embedding-001` est limité à 2048 tokens, trop peu pour un passage de 10000 caractères (environ 2700 tokens).
+- **Modèles** : nœuds natifs **Google Gemini → Message a Model**, sans sous-bulle de modèle :
+  - Gemini Flash Lite pour l'augmentation, le routing et le reranking, avec sortie JSON forcée ;
+  - Gemini Flash pour la réponse.
+  - Les seules sous-bulles restantes sont les embeddings `gemini-embedding-2` (3072 dimensions, jusqu'à 8192 tokens), accrochés au Supabase Vector Store. n8n n'a pas de nœud natif d'embeddings, et un HTTP Request n'est utilisé que s'il n'existe aucune autre solution.
 - **Stockage** : Supabase (pgvector), créé par [supabase/setup.sql](supabase/setup.sql) :
   - table `documents` : `content` est le chunk, avec `embedding`, `keywords` et `metadata` (section, articles, contexte, entités, relations…) ;
   - table `chat_messages` : historique, purgé après 30 jours ;
