@@ -6,7 +6,7 @@ const specs_Note = node({
   config: {
     name: 'Specs Note',
     parameters: {
-      content: '## Book Chatbot RAG (Supabase)\n\n**Goal:** chat with a non-fiction book (PDF).\n\n**Part 1 - Ingestion** (form): extraction > chunking > cleaning > augmentation > vectorisation.\n\n**Part 2 - Answering** (chat): input > selection > search > reranking > generation.\n\n**Models:** Google Gemini chat model and Google Gemini embeddings.\n\n**Store:** Supabase (pgvector), table documents and function match_documents (see supabase/setup.sql). Re-ingesting a book replaces its passages.\n\n**Emergency stop:** deactivate the workflow.',
+      content: '## Book Chatbot RAG V2\n\n**Goal:** chat with a non-fiction book (PDF).\n\n**Part 1 - Ingestion** (form): extraction > chunking > cleaning > augmentation > vectorisation.\n\n**Part 2 - Answering** (chat): input > selection > search > reranking > generation.\n\n**Models:** Google Gemini chat model and Google Gemini embeddings.\n\n**Store:** Supabase (pgvector), table documents and function match_documents (see supabase/setup.sql). Re-ingesting a book replaces its passages.\n\n**Emergency stop:** deactivate the workflow.',
       height: 420,
       width: 460,
       color: 2
@@ -23,7 +23,7 @@ const ingestion_Group = node({
     parameters: {
       content: '## Part 1 - Ingestion\nExtraction > Chunking > Cleaning > Augmentation > Vectorisation',
       height: 560,
-      width: 2540,
+      width: 2620,
       color: 7
     },
     position: [-60, -420]
@@ -100,14 +100,16 @@ const configuration_Ingestion = node({
           { id: 'cfg-chunk-size', name: 'chunkSize', value: 800, type: 'number' },
           { id: 'cfg-chunk-overlap', name: 'chunkOverlap', value: 150, type: 'number' },
           { id: 'cfg-min-chunk', name: 'minChunkLength', value: 200, type: 'number' },
-          { id: 'cfg-max-chunks', name: 'maxChunks', value: 0, type: 'number' }
+          { id: 'cfg-max-chunks', name: 'maxChunks', value: 30, type: 'number' },
+          { id: 'cfg-batch-size', name: 'passagesPerBatch', value: 20, type: 'number' },
+          { id: 'cfg-pause', name: 'pauseSeconds', value: 30, type: 'number' }
         ]
       },
       includeOtherFields: true,
       options: { stripBinary: false }
     },
     position: [220, -200],
-    notes: 'Ingestion settings. maxChunks = 0 means the whole book; set 30 to test quickly.',
+    notes: 'Ingestion settings. maxChunks = 0 means the whole book. Passages are embedded in batches with a pause to respect the free Gemini quota.',
     notesInFlow: true
   }
 });
@@ -274,7 +276,7 @@ const gemini_Embeddings_Ingestion = node({
     name: 'Google Gemini - Embed Passages',
     parameters: { modelName: 'models/gemini-embedding-2' },
     credentials: { googlePalmApi: newCredential('Google Gemini(PaLM) Api account', 'bk7GvyBH6j4OZcT1') },
-    position: [1920, 20]
+    position: [2140, 120]
   }
 });
 
@@ -299,7 +301,7 @@ const default_Data_Loader = node({
         }
       }
     },
-    position: [2080, 20]
+    position: [2300, 120]
   }
 });
 
@@ -386,7 +388,28 @@ return $('Augment Chunks').all();`
   }
 });
 
-const vector_Store_Insert = vectorStore({
+const loop_Over_Passages = splitInBatches({
+  version: 3,
+  config: {
+    name: 'Loop Over Passages',
+    parameters: { batchSize: expr('{{ $(\'Configuration - Ingestion\').first().json.passagesPerBatch }}'), options: {} },
+    position: [1980, -200]
+  }
+});
+
+const wait_Gemini_Quota = node({
+  type: 'n8n-nodes-base.wait',
+  version: 1.1,
+  config: {
+    name: 'Wait - Gemini Quota',
+    parameters: { resume: 'timeInterval', amount: expr('{{ $(\'Configuration - Ingestion\').first().json.pauseSeconds }}'), unit: 'seconds' },
+    position: [2420, -100],
+    notes: 'Pause between batches so the free Gemini embedding quota is not exceeded.',
+    notesInFlow: true
+  }
+});
+
+const vector_Store_Insert = node({
   type: '@n8n/n8n-nodes-langchain.vectorStoreSupabase',
   version: 1.3,
   config: {
@@ -394,14 +417,14 @@ const vector_Store_Insert = vectorStore({
     parameters: {
       mode: 'insert',
       tableName: { __rl: true, mode: 'id', value: expr('{{ $(\'Configuration - Ingestion\').first().json.tableName }}') },
-      embeddingBatchSize: 100,
+      embeddingBatchSize: expr('{{ $(\'Configuration - Ingestion\').first().json.passagesPerBatch }}'),
       options: { queryName: 'match_documents' }
     },
     credentials: { supabaseApi: newCredential('Supabase account', 'jd9iIXvhm8NntJ4J') },
     retryOnFail: true,
     maxTries: 3,
     waitBetweenTries: 5000,
-    position: [1980, -200],
+    position: [2200, -100],
     notes: 'Vectorisation: embeds every passage with Gemini and stores it in Supabase (pgvector).',
     notesInFlow: true,
     subnodes: { embedding: gemini_Embeddings_Ingestion, documentLoader: default_Data_Loader }
@@ -423,7 +446,7 @@ return [{ json: {
   table: $('Configuration - Ingestion').first().json.tableName
 } }];`
     },
-    position: [2200, -200],
+    position: [2200, -320],
     executeOnce: true,
     notes: 'Builds a short summary of the ingestion (book, number of passages).',
     notesInFlow: true
@@ -667,7 +690,7 @@ const format_Chat_Reply = node({
 
 // ─────────────────────────────── Workflow ───────────────────────────────
 
-const wf = workflow('Book Chatbot RAG (Supabase)', 'Book Chatbot RAG (Supabase)', {
+const wf = workflow('Book Chatbot RAG V2', 'Book Chatbot RAG V2', {
   description: 'Chatbot that answers questions about a non-fiction book (PDF) with retrieval-augmented generation. Part 1 ingests the book through a form (extraction, chunking, cleaning, augmentation, vectorisation into Supabase). Part 2 answers chat messages (input, selection, search, reranking, generation) with Google Gemini.',
   executionOrder: 'v1'
 });
@@ -686,8 +709,9 @@ export default wf
   .to(postgres_Ensure_Vector_Table)
   .to(supabase_Delete_Previous)
   .to(restore_Passages)
-  .to(vector_Store_Insert)
-  .to(build_Ingestion_Report)
+  .to(loop_Over_Passages
+    .onDone(build_Ingestion_Report)
+    .onEachBatch(vector_Store_Insert.to(wait_Gemini_Quota.to(nextBatch(loop_Over_Passages)))))
   .add(when_Chat_Message_Received)
   .to(configuration_Answering)
   .to(validate_Question)
