@@ -7,7 +7,7 @@ create extension if not exists vector;
 create table if not exists documents (
   id bigserial primary key,
   content text,          -- texte du passage (avec son en-tête d'augmentation)
-  metadata jsonb,        -- bookId, bookTitle, chapter, passageNumber, keywords
+  metadata jsonb,        -- bookId, bookTitle, section, articles, passageNumber, context, keywords, entities, relations...
   embedding vector(3072)
 );
 
@@ -19,8 +19,19 @@ alter table documents add column if not exists keywords text[]
   generated always as (string_to_array(nullif(metadata->>'keywords', ''), ', ')) stored;
 create index if not exists documents_keywords_idx on documents using gin (keywords);
 
+-- Historique du chat (étape Context de la partie Answering), purgé après 30 jours par le workflow.
+create table if not exists chat_messages (
+  id bigserial primary key,
+  session_id text not null,
+  role text not null,      -- user ou assistant
+  message text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists chat_messages_session_idx on chat_messages (session_id, id);
+
 -- Accès réservé à la clé service_role utilisée par n8n : aucune lecture publique.
 alter table documents enable row level security;
+alter table chat_messages enable row level security;
 
 -- Fonction appelée par le nœud Supabase Vector Store (queryName = match_documents).
 create or replace function match_documents (

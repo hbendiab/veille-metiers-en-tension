@@ -71,7 +71,7 @@ def main():
     print("En-têtes de page du Journal officiel restants :", len(re.findall(r"JO L du \d|ELI: http", text)))
 
     print("\nSections reconnues :")
-    for section, count in collections.Counter(r["metadata"].get("chapter") for r in rows).most_common(15):
+    for section, count in collections.Counter((r["metadata"].get("section") or r["metadata"].get("chapter")) for r in rows).most_common(15):
         print(f"  {count:>4} × {str(section)[:110]}")
 
     keyword_rows = fetch_keywords(load_env())

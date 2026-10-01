@@ -28,7 +28,7 @@ veille-metiers-en-tension/
 │   ├── config/                (configuration du CLI, standards de nommage, mise en page)
 │   └── workflows/
 │       ├── Job Market Watch.workflow.ts   (veille métiers en tension)
-│       └── Book Chatbot RAG V6.workflow.ts   (chatbot RAG sur un livre)
+│       └── Book Chatbot RAG V7.workflow.ts   (chatbot RAG sur un livre)
 ├── supabase/setup.sql         ← table vectorielle du chatbot RAG
 ├── scripts/                   ← création des credentials sans les écrire dans le code
 ├── skills/                    ← les skills IA utilisés pendant le projet
@@ -47,27 +47,46 @@ veille-metiers-en-tension/
 | Workflow | Rôle | Déclencheurs | Statut |
 |---|---|---|---|
 | **Job Market Watch** | Collecte, calcul des indicateurs, rapport | Chaque lundi à 7h + formulaire manuel (1 métier, 1 zone) | 🟡 Étape 1 sur 7 |
-| **Book Chatbot RAG V6** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
+| **Book Chatbot RAG V7** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
 
 Les workflows sont écrits en TypeScript (format `@n8n/workflow-sdk`) et synchronisés avec l'instance n8n Cloud par le CLI **n8ncli**. Le fichier `.workflow.ts` est la sauvegarde versionnée du workflow : il peut être renvoyé dans n8n à tout moment avec `n8ncli push`, même après la fin de l'essai gratuit.
 
-### Book Chatbot RAG V6
+### Book Chatbot RAG V7
 
-Un workflow, deux parties, chacune encadrée sur la toile n8n et documentée par une sticky note bleue (specs) :
+Un workflow, deux parties. Chaque étape est encadrée par une sticky note grise sur la toile n8n, et une sticky note bleue décrit les specs.
 
 | Partie | Déclencheur | Étapes |
 |---|---|---|
-| **1. Ingestion** | *On Form Submission* (dépôt du PDF, titre, auteur) | **Extraction** du texte → **Chunking par IA en fenêtre glissante** (Gemini lit une fenêtre de 4000 caractères aux lignes numérotées et indique où commence chaque passage de sens — considérant, article, section ; la fenêtre repart de la dernière coupe ; plan de secours à taille fixe si la réponse est invalide) → **Cleaning** (césures, numéros de page, sommaire et index retirés) → **Augmentation** (en-tête livre, auteur, chapitre, position, mots-clés) → **Vectorisation** (embeddings Google Gemini, stockage Supabase pgvector ; un nœud Postgres crée la table si besoin et supprime l'ancienne version du livre juste après l'extraction) |
-| **2. Answering** | *When Chat Message Received* | **Input** (nettoyage de la question) → **Selection** (Gemini reformule la question en requête de recherche) → **Recherche** (12 passages les plus proches) → **Reranking** (score sémantique + mots communs, doublons retirés, 4 passages gardés) → **Génération** (Gemini répond uniquement à partir des passages, avec citations [1], [2]) |
+| **1. Ingestion** | *On Form Submission* (PDF, titre, auteur) | **Extraction** : texte du PDF, nettoyage (en-têtes et pieds de page du Journal officiel, notes de bas de page, numéros de page, césures), puis conversion en **Markdown** (chapitres `#`, sections `##`, articles `###`) → **Chunking récursif** avec overlap : coupe d'abord sur les titres, puis paragraphes, lignes, phrases et mots ; passages de 5000 à 10000 caractères, 800 caractères de recouvrement → **Augmentation** par Gemini Flash Lite : contexte, questions hypothétiques, mots-clés, entités et relations → **Vectorisation** : `gemini-embedding-2`, stockage Supabase. La colonne `keywords` est calculée par Postgres. |
+| **2. Answering** | *When Chat Message Received* | **Input** : nettoyage de la question → **Context** : messages de la session lus dans `chat_messages` ; *If - Empty Conversation* : sinon, Gemini réécrit la question pour qu'elle se comprenne sans l'historique → **Routing** : Gemini Flash Lite produit la requête de recherche, les mots-clés et les filtres d'articles → **Search** : recherche vectorielle et recherche par mots-clés et articles, sans doublons → **Reranking** : Gemini Flash Lite note chaque passage de 0 à 1 ; les 3 meilleurs au-dessus de 0,3 sont gardés → **Generation** : Gemini Flash répond uniquement à partir des passages, avec citations [1], [2], puis l'échange est enregistré |
 
 Choix principaux :
-- **Modèles** : Google Gemini Chat Model (réponse) et un modèle léger (reformulation), `gemini-flash-latest` ; Embeddings Google Gemini `gemini-embedding-001` (3072 dimensions), le même pour l'indexation et la recherche.
-- **Stockage** : Supabase (pgvector), table `documents` et fonction `match_documents`, créées par [supabase/setup.sql](supabase/setup.sql).
-- **Réglages** regroupés dans deux nœuds *Configuration* en tête de chaque partie (taille des passages, nombre de résultats, mode test avec `maxChunks`).
-- **Quota Gemini gratuit** : 1000 embeddings **par jour et par modèle** (vérifié : `EmbedContentRequestsPerDayPerProjectPerModel-FreeTier = 1000`), donc un livre entier doit rester sous ~900 passages ; au-delà, l'API renvoie 429 et LangChain produit des vecteurs vides (« vector must have at least 1 dimension »).
-- **Débit** : les passages sont vectorisés par paquets (`passagesPerBatch`, 20 par défaut) avec une pause (`pauseSeconds`, 30 s) entre chaque paquet ; un lot de 100 dépassait le quota (erreur 429) et produisait des vecteurs vides.
-- **Garde-fous** : réponse limitée aux passages du livre, « je ne trouve pas cette information » si rien ne correspond, instructions contenues dans le livre ou la question ignorées, retry sur chaque appel à Gemini.
-- **Limite connue** : pas d'index vectoriel (pgvector limite HNSW à 2000 dimensions) ; suffisant pour quelques livres. Les améliorations prévues sont listées dans la sticky note verte.
+- **Chunking récursif** plutôt que par IA : l'ancienne version (fenêtre glissante où Gemini choisissait les coupes) prenait plus d'une heure sur l'AI Act. Le découpage récursif est instantané. Testé sur l'AI Act : 99 passages, 96 entre 5000 et 10000 caractères ; les 3 autres font au moins 4665 caractères.
+- **Modèles** :
+  - Gemini Flash Lite (`gemini-flash-lite-latest`) pour l'augmentation, le routing et le reranking ;
+  - Gemini Flash (`gemini-flash-latest`) pour la réponse ;
+  - `gemini-embedding-2` (3072 dimensions, jusqu'à 8192 tokens) pour l'indexation et la recherche. `gemini-embedding-001` est limité à 2048 tokens, trop peu pour un passage de 10000 caractères (environ 2700 tokens).
+- **Stockage** : Supabase (pgvector), créé par [supabase/setup.sql](supabase/setup.sql) :
+  - table `documents` : `content` est le chunk, avec `embedding`, `keywords` et `metadata` (section, articles, contexte, entités, relations…) ;
+  - table `chat_messages` : historique, purgé après 30 jours ;
+  - fonction `match_documents`.
+  - Les noms `content`, `metadata` et `embedding` sont imposés par le nœud Supabase Vector Store de n8n.
+- **Réglages** : regroupés dans deux nœuds *Configuration*, un en tête de chaque partie (taille des chunks, overlap, nombre de résultats, seuil de reranking, mode test avec `maxChunks`).
+- **Quota Gemini gratuit** :
+  - 1000 embeddings par jour et par modèle (vérifié : `EmbedContentRequestsPerDayPerProjectPerModel-FreeTier = 1000`) ;
+  - augmentation et vectorisation par paquets de 5 passages, avec 20 s de pause, soit environ 15 minutes pour l'AI Act.
+  - Si le quota est dépassé, l'API renvoie 429 et LangChain produit des vecteurs vides (« vector must have at least 1 dimension »).
+- **Garde-fous** :
+  - réponse limitée aux passages du livre ;
+  - « je ne trouve pas cette information » si rien ne correspond ;
+  - instructions contenues dans le livre, l'historique ou la question ignorées ;
+  - retry sur chaque appel à Gemini ;
+  - message de secours si Gemini ne répond pas ;
+  - repli sur l'ordre de recherche si le reranking échoue.
+- **Limites connues** :
+  - extraction sans OCR : le PDF doit contenir du texte sélectionnable ;
+  - pas d'index vectoriel (pgvector limite HNSW à 2000 dimensions), ce qui suffit pour quelques livres.
+  - Les améliorations prévues sont listées dans la sticky note verte.
 
 ### Avancement de Job Market Watch
 

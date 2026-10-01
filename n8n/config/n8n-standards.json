@@ -114,7 +114,9 @@
       "pgvector",
       "rolling-window",
       "Rolling-Window",
-      "maxWindows"
+      "maxWindows",
+      "OCR",
+      "PDFs"
     ],
     "_comment_allowedWords": "Add custom words here that are specific to your workflows to prevent spelling warnings.",
     "errorMessage": "Text, names, and variables must be written in English."
