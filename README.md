@@ -28,7 +28,7 @@ veille-metiers-en-tension/
 │   ├── config/                (configuration du CLI, standards de nommage, mise en page)
 │   └── workflows/
 │       ├── Job Market Watch.workflow.ts   (veille métiers en tension)
-│       └── Book Chatbot RAG V4.workflow.ts   (chatbot RAG sur un livre)
+│       └── Book Chatbot RAG V5.workflow.ts   (chatbot RAG sur un livre)
 ├── supabase/setup.sql         ← table vectorielle du chatbot RAG
 ├── scripts/                   ← création des credentials sans les écrire dans le code
 ├── skills/                    ← les skills IA utilisés pendant le projet
@@ -47,11 +47,11 @@ veille-metiers-en-tension/
 | Workflow | Rôle | Déclencheurs | Statut |
 |---|---|---|---|
 | **Job Market Watch** | Collecte, calcul des indicateurs, rapport | Chaque lundi à 7h + formulaire manuel (1 métier, 1 zone) | 🟡 Étape 1 sur 7 |
-| **Book Chatbot RAG V4** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
+| **Book Chatbot RAG V5** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
 
 Les workflows sont écrits en TypeScript (format `@n8n/workflow-sdk`) et synchronisés avec l'instance n8n Cloud par le CLI **n8ncli**. Le fichier `.workflow.ts` est la sauvegarde versionnée du workflow : il peut être renvoyé dans n8n à tout moment avec `n8ncli push`, même après la fin de l'essai gratuit.
 
-### Book Chatbot RAG V4
+### Book Chatbot RAG V5
 
 Un workflow, deux parties, chacune encadrée sur la toile n8n et documentée par une sticky note bleue (specs) :
 
@@ -61,10 +61,11 @@ Un workflow, deux parties, chacune encadrée sur la toile n8n et documentée par
 | **2. Answering** | *When Chat Message Received* | **Input** (nettoyage de la question) → **Selection** (Gemini reformule la question en requête de recherche) → **Recherche** (12 passages les plus proches) → **Reranking** (score sémantique + mots communs, doublons retirés, 4 passages gardés) → **Génération** (Gemini répond uniquement à partir des passages, avec citations [1], [2]) |
 
 Choix principaux :
-- **Modèles** : Google Gemini Chat Model (réponse) et un modèle léger (reformulation), `gemini-flash-latest` ; Embeddings Google Gemini `gemini-embedding-2` (3072 dimensions), le même pour l'indexation et la recherche.
+- **Modèles** : Google Gemini Chat Model (réponse) et un modèle léger (reformulation), `gemini-flash-latest` ; Embeddings Google Gemini `gemini-embedding-001` (3072 dimensions), le même pour l'indexation et la recherche.
 - **Stockage** : Supabase (pgvector), table `documents` et fonction `match_documents`, créées par [supabase/setup.sql](supabase/setup.sql).
 - **Réglages** regroupés dans deux nœuds *Configuration* en tête de chaque partie (taille des passages, nombre de résultats, mode test avec `maxChunks`).
-- **Quota Gemini gratuit** : les passages sont vectorisés par paquets (`passagesPerBatch`, 20 par défaut) avec une pause (`pauseSeconds`, 30 s) entre chaque paquet ; un lot de 100 dépassait le quota (erreur 429) et produisait des vecteurs vides.
+- **Quota Gemini gratuit** : 1000 embeddings **par jour et par modèle** (vérifié : `EmbedContentRequestsPerDayPerProjectPerModel-FreeTier = 1000`), donc un livre entier doit rester sous ~900 passages ; au-delà, l'API renvoie 429 et LangChain produit des vecteurs vides (« vector must have at least 1 dimension »).
+- **Débit** : les passages sont vectorisés par paquets (`passagesPerBatch`, 20 par défaut) avec une pause (`pauseSeconds`, 30 s) entre chaque paquet ; un lot de 100 dépassait le quota (erreur 429) et produisait des vecteurs vides.
 - **Garde-fous** : réponse limitée aux passages du livre, « je ne trouve pas cette information » si rien ne correspond, instructions contenues dans le livre ou la question ignorées, retry sur chaque appel à Gemini.
 - **Limite connue** : pas d'index vectoriel (pgvector limite HNSW à 2000 dimensions) ; suffisant pour quelques livres. Les améliorations prévues sont listées dans la sticky note verte.
 

@@ -6,7 +6,7 @@ const specs_Note = node({
   config: {
     name: 'Specs Note',
     parameters: {
-      content: '## Book Chatbot RAG V4\n\n**Goal:** chat with a non-fiction book (PDF).\n\n**Part 1 - Ingestion** (form): extraction > AI rolling-window chunking (Gemini picks the cuts) > cleaning > augmentation > vectorisation.\n\n**Part 2 - Answering** (chat): input > selection > search > reranking > generation.\n\n**Models:** Google Gemini chat model and Google Gemini embeddings.\n\n**Store:** Supabase (pgvector), table documents and function match_documents (see supabase/setup.sql). Re-ingesting a book replaces its passages.\n\n**Emergency stop:** deactivate the workflow.',
+      content: '## Book Chatbot RAG V5\n\n**Goal:** chat with a non-fiction book (PDF).\n\n**Part 1 - Ingestion** (form): extraction > AI rolling-window chunking (Gemini picks the cuts) > cleaning > augmentation > vectorisation.\n\n**Part 2 - Answering** (chat): input > selection > search > reranking > generation.\n\n**Models:** Google Gemini chat model and Google Gemini embeddings.\n\n**Store:** Supabase (pgvector), table documents and function match_documents (see supabase/setup.sql). Re-ingesting a book replaces its passages.\n\n**Emergency stop:** deactivate the workflow.',
       height: 420,
       width: 460,
       color: 2
@@ -112,7 +112,7 @@ const configuration_Ingestion = node({
       options: { stripBinary: false }
     },
     position: [220, -200],
-    notes: 'Ingestion settings. maxChunks = 0 means the whole book. Passages are embedded in batches with a pause to respect the free Gemini quota.',
+    notes: 'Ingestion settings. maxChunks = 0 means the whole book. Passages are embedded in batches with a pause. Free Gemini tier: 1000 embeddings per day per model, so a whole book must stay under about 900 passages.',
     notesInFlow: true
   }
 });
@@ -465,7 +465,7 @@ const gemini_Embeddings_Ingestion = node({
   version: 1,
   config: {
     name: 'Google Gemini - Embed Passages',
-    parameters: { modelName: 'models/gemini-embedding-2' },
+    parameters: { modelName: 'models/gemini-embedding-001' },
     credentials: { googlePalmApi: newCredential('Google Gemini(PaLM) Api account', 'bk7GvyBH6j4OZcT1') },
     position: [2580, 120]
   }
@@ -649,7 +649,7 @@ const gemini_Embeddings_Query = node({
   version: 1,
   config: {
     name: 'Google Gemini - Embed Query',
-    parameters: { modelName: 'models/gemini-embedding-2' },
+    parameters: { modelName: 'models/gemini-embedding-001' },
     credentials: { googlePalmApi: newCredential('Google Gemini(PaLM) Api account', 'bk7GvyBH6j4OZcT1') },
     position: [960, 660]
   }
@@ -787,7 +787,7 @@ const format_Chat_Reply = node({
 
 // ─────────────────────────────── Workflow ───────────────────────────────
 
-const wf = workflow('Book Chatbot RAG V4', 'Book Chatbot RAG V4', {
+const wf = workflow('Book Chatbot RAG V5', 'Book Chatbot RAG V5', {
   description: 'Chatbot that answers questions about a non-fiction book (PDF) with retrieval-augmented generation. Part 1 ingests the book through a form (extraction, chunking, cleaning, augmentation, vectorisation into Supabase). Part 2 answers chat messages (input, selection, search, reranking, generation) with Google Gemini.',
   executionOrder: 'v1'
 });
