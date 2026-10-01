@@ -315,7 +315,7 @@ const supabase_Delete_Previous = node({
       filterType: 'string',
       filterString: expr('metadata->>bookId=eq.{{ $json.bookId }}')
     },
-    credentials: { supabaseApi: newCredential('Supabase account') },
+    credentials: { supabaseApi: newCredential('Supabase account', 'jd9iIXvhm8NntJ4J') },
     executeOnce: true,
     alwaysOutputData: true,
     retryOnFail: true,
@@ -353,7 +353,7 @@ const vector_Store_Insert = vectorStore({
       embeddingBatchSize: 100,
       options: { queryName: 'match_documents' }
     },
-    credentials: { supabaseApi: newCredential('Supabase account') },
+    credentials: { supabaseApi: newCredential('Supabase account', 'jd9iIXvhm8NntJ4J') },
     retryOnFail: true,
     maxTries: 3,
     waitBetweenTries: 5000,
@@ -504,7 +504,7 @@ const vector_Store_Search = vectorStore({
       includeDocumentMetadata: true,
       options: { queryName: 'match_documents' }
     },
-    credentials: { supabaseApi: newCredential('Supabase account') },
+    credentials: { supabaseApi: newCredential('Supabase account', 'jd9iIXvhm8NntJ4J') },
     alwaysOutputData: true,
     retryOnFail: true,
     maxTries: 3,
