@@ -26,9 +26,13 @@ veille-metiers-en-tension/
 │   └── classeur_veille_metiers_en_tension.xlsx
 ├── n8n/                       ← le COMMENT : les workflows, gérés avec n8ncli
 │   ├── config/                (configuration du CLI, standards de nommage, mise en page)
-│   └── workflows/
-│       ├── Job Market Watch.workflow.ts   (veille métiers en tension)
-│       └── Book Chatbot RAG V13.workflow.ts   (chatbot RAG sur un livre)
+│   └── workflows/             (mêmes dossiers que dans n8n, selon l'organisation du cours)
+│       ├── Projects/          ← workflows stabilisés, un dossier par projet
+│       │   ├── Chatbot RAG/Book Chatbot RAG V13.workflow.ts
+│       │   └── Veille Métiers en Tension/Job Market Watch.workflow.ts
+│       ├── Sandbox/Hanine Bendiab/   ← dossier personnel de tests (« Prénom Nom »)
+│       ├── Templates/         ← squelettes de workflows à dupliquer (vide pour l'instant)
+│       └── Utils/             ← sous-workflows communs, ex. gestion des erreurs (vide pour l'instant)
 ├── supabase/setup.sql         ← table vectorielle du chatbot RAG
 ├── scripts/                   ← création des credentials sans les écrire dans le code
 ├── skills/                    ← les skills IA utilisés pendant le projet
@@ -37,6 +41,8 @@ veille-metiers-en-tension/
 │   └── hostile-review/
 └── .agents/skills/n8n/        ← skill fourni par n8ncli (commandes du CLI)
 ```
+
+**Dans n8n**, les workflows sont rangés dans les mêmes dossiers : *Projects* (un sous-dossier par projet), *Sandbox* (dossier personnel de tests), *Templates* et *Utils*. Les anciennes versions du chatbot (V2 à V12) sont archivées.
 
 **Logique :** `docs/` dit ce qu'il faut construire, `n8n/` contient ce qui est construit, `data/` contient la structure de stockage, `skills/` contient les méthodes de travail avec l'IA.
 
@@ -175,7 +181,7 @@ Un skill est une méthode écrite que l'assistant IA (Claude) applique quand la 
 ```
 n8ncli pull                                              # récupérer la version en ligne
 n8ncli validate --lint                                   # vérifier les workflows
-n8ncli push "n8n/workflows/Job Market Watch.workflow.ts" # envoyer un workflow vers n8n
+n8ncli push "n8n/workflows/Projects/Veille Métiers en Tension/Job Market Watch.workflow.ts" # envoyer un workflow vers n8n
 ```
 
 **Tester Job Market Watch :** relier les nœuds Google Sheets au classeur, puis lancer le formulaire manuel (1 métier, 1 zone) ou le déclencheur hebdomadaire (8 couples).
@@ -186,7 +192,7 @@ n8ncli push "n8n/workflows/Job Market Watch.workflow.ts" # envoyer un workflow v
 
 **Limite de n8ncli sans clé API :** sans clé API n8n (absente de l'essai gratuit) ni accès à la base n8n, `n8ncli push` **crée** bien un nouveau workflow mais **ne modifie pas** un workflow existant (il ne met à jour que son nom tout en affichant « UPDATED »). Une modification se publie donc sous un nouveau nom, puis on vérifie avec `n8ncli pull` que le contenu en ligne est le bon.
 
-**Arrêt d'urgence :** désactiver le workflow dans n8n (bouton *Active*) ou `n8ncli unpublish "n8n/workflows/Job Market Watch.workflow.ts"`.
+**Arrêt d'urgence :** désactiver le workflow dans n8n (bouton *Active*) ou `n8ncli unpublish "n8n/workflows/Projects/Veille Métiers en Tension/Job Market Watch.workflow.ts"`.
 
 ---
 
