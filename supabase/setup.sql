@@ -29,6 +29,22 @@ create table if not exists chat_messages (
 );
 create index if not exists chat_messages_session_idx on chat_messages (session_id, id);
 
+-- Graphe de connaissances (GraphRAG) : une ligne par relation source → relation → target, avec son passage.
+-- Créée aussi automatiquement par le nœud Postgres - Save Graph si elle manque.
+create extension if not exists pg_trgm;
+create table if not exists graph_relations (
+  id bigserial primary key,
+  book_id text not null,
+  passage_number int not null,
+  source text not null,       -- entité en minuscules, ex. « autorité notifiante »
+  relation text not null,     -- verbe court, ex. « contrôle »
+  target text not null
+);
+create index if not exists graph_relations_book_idx on graph_relations (book_id);
+create index if not exists graph_relations_source_idx on graph_relations using gin (source gin_trgm_ops);
+create index if not exists graph_relations_target_idx on graph_relations using gin (target gin_trgm_ops);
+alter table graph_relations enable row level security;
+
 -- Accès réservé à la clé service_role utilisée par n8n : aucune lecture publique.
 alter table documents enable row level security;
 alter table chat_messages enable row level security;

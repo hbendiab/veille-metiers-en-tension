@@ -28,7 +28,7 @@ veille-metiers-en-tension/
 │   ├── config/                (configuration du CLI, standards de nommage, mise en page)
 │   └── workflows/
 │       ├── Job Market Watch.workflow.ts   (veille métiers en tension)
-│       └── Book Chatbot RAG V11.workflow.ts   (chatbot RAG sur un livre)
+│       └── Book Chatbot RAG V12.workflow.ts   (chatbot RAG sur un livre)
 ├── supabase/setup.sql         ← table vectorielle du chatbot RAG
 ├── scripts/                   ← création des credentials sans les écrire dans le code
 ├── skills/                    ← les skills IA utilisés pendant le projet
@@ -47,20 +47,25 @@ veille-metiers-en-tension/
 | Workflow | Rôle | Déclencheurs | Statut |
 |---|---|---|---|
 | **Job Market Watch** | Collecte, calcul des indicateurs, rapport | Chaque lundi à 7h + formulaire manuel (1 métier, 1 zone) | 🟡 Étape 1 sur 7 |
-| **Book Chatbot RAG V11** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
+| **Book Chatbot RAG V12** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
 
 Les workflows sont écrits en TypeScript (format `@n8n/workflow-sdk`) et synchronisés avec l'instance n8n Cloud par le CLI **n8ncli**. Le fichier `.workflow.ts` est la sauvegarde versionnée du workflow : il peut être renvoyé dans n8n à tout moment avec `n8ncli push`, même après la fin de l'essai gratuit.
 
-### Book Chatbot RAG V11
+### Book Chatbot RAG V12
 
 Un workflow, deux parties. Chaque étape est encadrée par une sticky note grise sur la toile n8n, et une sticky note bleue décrit les specs.
 
 | Partie | Déclencheur | Étapes |
 |---|---|---|
-| **1. Ingestion** | *On Form Submission* (PDF, titre, auteur) | **Extraction** : texte du PDF, nettoyage (en-têtes et pieds de page du Journal officiel, notes de bas de page, numéros de page, césures), puis conversion en **Markdown** (chapitres `#`, sections `##`, articles `###`) → **Chunking récursif** avec overlap : coupe d'abord sur les titres, puis paragraphes, lignes, phrases et mots ; passages de 5000 à 10000 caractères, 800 caractères de recouvrement → **Augmentation** par Gemini Flash Lite : contexte, questions hypothétiques, mots-clés, entités et relations → **Vectorisation** : `gemini-embedding-2`, stockage Supabase. La colonne `keywords` est calculée par Postgres. |
-| **2. Answering** | *When Chat Message Received* | **Input** : nettoyage de la question → **Context** : messages de la session lus dans `chat_messages` ; *If - Empty Conversation* : sinon, Gemini réécrit la question pour qu'elle se comprenne sans l'historique → **Routing** : Gemini Flash Lite produit la requête de recherche, les mots-clés et les filtres d'articles → **Search** : recherche vectorielle et recherche par mots-clés et articles, sans doublons → **Reranking** : Gemini Flash Lite note chaque passage de 0 à 1 ; les 3 meilleurs au-dessus de 0,3 sont gardés → **Generation** : Gemini Flash répond uniquement à partir des passages, avec citations [1], [2], puis l'échange est enregistré |
+| **1. Ingestion** | *On Form Submission* (PDF, titre, auteur) | **Extraction** : texte du PDF, nettoyage (en-têtes et pieds de page du Journal officiel, notes de bas de page, numéros de page, césures), puis conversion en **Markdown** (chapitres `#`, sections `##`, articles `###`) → **Chunking récursif** avec overlap : coupe d'abord sur les titres, puis paragraphes, lignes, phrases et mots ; passages de 5000 à 10000 caractères, 800 caractères de recouvrement → **Augmentation** par Gemini Flash Lite : contexte, questions hypothétiques, mots-clés, entités et relations → **Vectorisation** : `gemini-embedding-2`, stockage Supabase. → **Graphe** : les relations extraites par Gemini (par exemple `autorité notifiante → contrôle → organisme notifié`) sont rangées dans `graph_relations` par *Postgres - Save Graph*. La colonne `keywords` est calculée par Postgres. |
+| **2. Answering** | *When Chat Message Received* | **Input** : nettoyage de la question → **Context** : messages de la session lus dans `chat_messages` ; *If - Empty Conversation* : sinon, Gemini réécrit la question pour qu'elle se comprenne sans l'historique → **Routing** : Gemini Flash Lite produit la requête de recherche, les mots-clés et les filtres d'articles → **Search** : recherche vectorielle, recherche par mots-clés et articles, et **recherche dans le graphe** (*Postgres - Search Graph* : relations autour des entités de la question, puis un saut vers leurs voisines, et les passages les plus liés), sans doublons → **Reranking** : Gemini Flash Lite note chaque passage de 0 à 1 ; les 3 meilleurs au-dessus de 0,3 sont gardés → **Generation** : Gemini Flash Lite répond à partir des passages et des faits du graphe (balise `<faits>`), avec citations [1], [2], puis l'échange est enregistré |
 
 Choix principaux :
+- **GraphRAG « local »**, stocké dans Supabase (pas de Neo4j : ce serait un service de plus, sans nœud natif dans n8n) :
+  - les entités et relations sont extraites dans le même appel Gemini que l'augmentation, donc aucun appel de plus ;
+  - à la question, une seule requête SQL parcourt le graphe ; `pg_trgm` permet de retrouver « commission » dans « commission européenne » ;
+  - testé sur 8 passages de l'AI Act : 24 relations, entités nommées de la même façon d'un passage à l'autre.
+  - Le GraphRAG « global » de Microsoft (communautés et résumés) a été écarté : trop d'appels pour le quota gratuit.
 - **Chunking récursif** plutôt que par IA : l'ancienne version (fenêtre glissante où Gemini choisissait les coupes) prenait plus d'une heure sur l'AI Act. Le découpage récursif est instantané. Testé sur l'AI Act : 99 passages, 96 entre 5000 et 10000 caractères ; les 3 autres font au moins 4665 caractères.
 - **Modèles** : nœuds natifs **Google Gemini → Message a Model**, sans sous-bulle de modèle, tous sur `gemini-3.5-flash-lite`.
   - Mesure : environ 1 s par appel, contre 18 s pour `gemini-3.5-flash` qui « réfléchit » longtemps. `gemini-flash-latest` renvoyait des erreurs 503 (surcharge).
