@@ -50,6 +50,8 @@ alter table documents enable row level security;
 alter table chat_messages enable row level security;
 
 -- Fonction appelée par le nœud Supabase Vector Store (queryName = match_documents).
+-- Une clé de filtre vide est ignorée : un bookId vide cherche dans tous les documents.
+-- Le nœud Postgres - Prepare Storage la remet à jour à chaque ingestion.
 create or replace function match_documents (
   query_embedding vector(3072),
   match_count int default null,
@@ -62,7 +64,11 @@ create or replace function match_documents (
 )
 language plpgsql
 as $$
+declare
+  active_filter jsonb;
 begin
+  select coalesce(jsonb_object_agg(f.key, f.value), '{}'::jsonb) into active_filter
+  from jsonb_each(filter) f where f.value not in ('""'::jsonb, 'null'::jsonb);
   return query
   select
     documents.id,
@@ -70,7 +76,7 @@ begin
     documents.metadata,
     1 - (documents.embedding <=> query_embedding) as similarity
   from documents
-  where documents.metadata @> filter
+  where documents.metadata @> active_filter
   order by documents.embedding <=> query_embedding
   limit match_count;
 end;
