@@ -75,6 +75,11 @@ Choix principaux :
   - *Convert Text to Markdown* applique ce profil, après vérification : une règle invalide ou qui reconnaîtrait plus de 25 % des lignes est écartée, et les ordinaux « Ier », « 1er » sont tolérés. Des règles générales servent de complément, et de solution de repli si Gemini échoue ;
   - le nombre d'unités, la première et la dernière, le nombre de divisions et le plan sont enregistrés pour les questions du type « combien d'articles ? ».
   - Testé sans aucune règle propre à un document, sur 5 documents : Code pénal (1 301 articles, livres > titres > chapitres), AI Act (113 articles, 13 chapitres), Fables (18 fables), Apollo 11 en HTML et le cours n8n en Markdown.
+- **Questions de liste** (« toutes les fables qui parlent d'argent ») : un RAG classique ne lit que les meilleurs passages, sa liste n'est donc jamais complète.
+  - Le Routing reconnaît ces questions (`scope` = « liste »). Si le document fait moins de 200 000 caractères, *Postgres - Get Full Document* le donne **en entier** à la génération ; sinon, la réponse précise qu'elle ne porte que sur des extraits.
+  - Un thème est compris au sens large (l'argent : payer, prêter, dette, intérêt…).
+  - Seules les sources réellement citées sont affichées.
+  - Testé dans n8n (exécution 109) : *La Cigale et la Fourmi*, *Les Deux Mulets* et *Simonide préservé par les Dieux*. Avant, *La Cigale* manquait.
 - **Robustesse du chat** : si la recherche par vecteurs échoue (quota Gemini, par exemple pendant une ingestion), la réponse s'appuie sur la recherche par mots-clés et sur le graphe, au lieu de s'arrêter en erreur.
 - **Questions sur le document lui-même** (nombre de pages, plan, nombre de chapitres) :
   - à l'ingestion, le format, le nombre de pages (PDF) et le plan (titres `#` et `##`) sont enregistrés avec les passages ;
