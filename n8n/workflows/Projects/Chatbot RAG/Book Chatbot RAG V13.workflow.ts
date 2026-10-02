@@ -6,7 +6,7 @@ const specs_Note = node({
   config: {
     name: 'Specs Note',
     parameters: {
-      content: '## Book Chatbot RAG V13\n\n**Goal:** chat with any non-fiction document (PDF, TXT, Markdown or HTML), one or several at a time.\n\n**Part 1 - Ingestion** (form): extraction to Markdown > Gemini analyzes the structure of each document (type, divisions, units) > recursive chunking (5000 to 10000 characters, overlap) > augmentation by Gemini (context, hypothetical questions, keywords, entities and relations) > vectorisation + knowledge graph (relations between entities stored in graph_relations).\n\n**Part 2 - Answering** (chat): input > context (session messages, indexed documents) > routing (document, query, keywords, article filters) > search (vectors + keywords + graph: entities of the question, one hop to their neighbours) > reranking (Gemini Flash Lite) > generation.\n\n**Models:** native Google Gemini nodes (Message a Model, no sub-node), all on Gemini 3.5 Flash Lite: about 1 second per call (pinned version, no -latest alias). Gemini embedding 2 (only remaining sub-node: n8n has no native embedding node) (vectors, up to 8192 tokens per passage).\n\n**Store:** Supabase (pgvector), tables documents and chat_messages, created once by supabase/setup.sql; graph_relations is created by Postgres - Save Graph if missing. Re-ingesting a book replaces its passages.\n\n**Errors:** failed executions are logged by the Error Handler workflow (Utils) in the table workflow_errors.\n\n**Emergency stop:** deactivate the workflow.',
+      content: '## Book Chatbot RAG V13\n\n**Goal:** chat with any non-fiction document (PDF, TXT, Markdown or HTML), one or several at a time.\n\n**Part 1 - Ingestion** (form): extraction to Markdown > Gemini analyzes the structure of each document (type, divisions, units) > adaptive structure-aware chunking (one unit per passage, size adapted to the document) > augmentation by Gemini (context, hypothetical questions, keywords, entities and relations) > vectorisation + knowledge graph (relations between entities stored in graph_relations).\n\n**Part 2 - Answering** (chat): input > context (session messages, indexed documents) > routing (document, query, keywords, article filters) > search (vectors + keywords + graph: entities of the question, one hop to their neighbours) > reranking (Gemini Flash Lite) > generation.\n\n**Models:** native Google Gemini nodes (Message a Model, no sub-node), all on Gemini 3.5 Flash Lite: about 1 second per call (pinned version, no -latest alias). Gemini embedding 2 (only remaining sub-node: n8n has no native embedding node) (vectors, up to 8192 tokens per passage).\n\n**Store:** Supabase (pgvector), tables documents and chat_messages, created once by supabase/setup.sql; graph_relations is created by Postgres - Save Graph if missing. Re-ingesting a book replaces its passages.\n\n**Errors:** failed executions are logged by the Error Handler workflow (Utils) in the table workflow_errors.\n\n**Emergency stop:** deactivate the workflow.',
       height: 520,
       width: 480,
       color: 2
@@ -45,7 +45,7 @@ const chunking_Group = node({
   version: 1,
   config: {
     name: 'Chunking Group',
-    parameters: { content: '## 2. Chunking\nRecursive with overlap', height: 400, width: 260, color: 7 },
+    parameters: { content: '## 2. Chunking\nAdaptive, structure-aware: one passage per unit (article, fable…), section or paragraph; short neighbours merged, long units split; at most maxPassages per document', height: 400, width: 260, color: 7 },
     position: [1520, -460]
   }
 });
@@ -168,12 +168,13 @@ const configuration_Ingestion = node({
         assignments: [
           { id: 'cfg-table-name', name: 'tableName', value: 'documents', type: 'string' },
           { id: 'cfg-book-id', name: 'bookId', value: expr('{{ String($json.bookTitle || \'\').normalize(\'NFD\').replace(/[\\u0300-\\u036f]/g, \'\').toLowerCase().replace(/[^a-z0-9]+/g, \'-\').replace(/^-|-$/g, \'\') || \'document\' }}'), type: 'string' },
-          { id: 'cfg-chunk-size', name: 'chunkSize', value: 8000, type: 'number' },
-          { id: 'cfg-chunk-overlap', name: 'chunkOverlap', value: 800, type: 'number' },
-          { id: 'cfg-min-chunk', name: 'minChunkSize', value: 5000, type: 'number' },
-          { id: 'cfg-max-chunk', name: 'maxChunkSize', value: 10000, type: 'number' },
+          { id: 'cfg-chunk-size', name: 'chunkSize', value: 4000, type: 'number' },
+          { id: 'cfg-chunk-overlap', name: 'chunkOverlap', value: 300, type: 'number' },
+          { id: 'cfg-min-chunk', name: 'minChunkSize', value: 400, type: 'number' },
+          { id: 'cfg-max-chunk', name: 'maxChunkSize', value: 4000, type: 'number' },
+          { id: 'cfg-max-passages', name: 'maxPassages', value: 300, type: 'number' },
           { id: 'cfg-max-chunks', name: 'maxChunks', value: 0, type: 'number' },
-          { id: 'cfg-batch-size', name: 'passagesPerBatch', value: 8, type: 'number' },
+          { id: 'cfg-batch-size', name: 'passagesPerBatch', value: 16, type: 'number' },
           { id: 'cfg-pause', name: 'pauseSeconds', value: 15, type: 'number' }
         ]
       },
@@ -181,7 +182,7 @@ const configuration_Ingestion = node({
       options: { stripBinary: false }
     },
     position: [220, -260],
-    notes: 'Chunk sizes in characters (5000 to 10000, overlap 800). maxChunks = 0 means the whole book. Passages are augmented (one Gemini call) and embedded 8 at a time, with a 15 s pause: the free Gemini tier also limits tokens per minute.',
+    notes: 'Passages of 400 to 4000 characters following the structure, at most maxPassages per document. maxChunks = 0 means the whole book. Passages are augmented (one Gemini call) and embedded 8 at a time, with a 15 s pause: the free Gemini tier also limits tokens per minute.',
     notesInFlow: true
   }
 });
@@ -554,114 +555,120 @@ const split_Recursive_Chunks = node({
   version: 2,
   config: {
     name: 'Split Recursive Chunks',
-    parameters: { jsCode: `// Recursive chunking: splits on the biggest separator first (divisions #, ##, ###, units ####, paragraph, line, sentence, word),
-// merges the pieces up to chunkSize with chunkOverlap characters of overlap, then merges a too short last passage.
+    parameters: { jsCode: `// Structure-aware chunking: one passage per unit of the document (article, fable…), or per section, or per paragraph
+// when there is no heading. Short neighbouring units of the same division are merged, long ones are split with overlap,
+// and the size adapts to the document so that it never needs more than maxPassages passages (daily embedding quota).
 const cfg = $('Configuration - Ingestion').first().json;
 const text = $input.first().json.markdown;
-const separators = ['\\n# ', '\\n## ', '\\n### ', '\\n#### ', '\\n\\n', '\\n', '. ', ' ', ''];
 
-function splitKeep(t, sep) {
-  if (sep === '') return [...t];
-  const parts = t.split(sep);
-  return parts.map((p, i) => (i === 0 ? p : sep + p)).filter(p => p.length > 0);
-}
-
-function merge(pieces) {
-  const chunks = [];
-  let current = [];
-  let total = 0;
-  for (const piece of pieces) {
-    if (total + piece.length > cfg.chunkSize && current.length > 0) {
-      chunks.push(current.join(''));
-      // Keeps the last pieces as overlap while they fit in chunkOverlap.
-      while (total > cfg.chunkOverlap || (total + piece.length > cfg.chunkSize && total > 0)) {
-        total -= current.shift().length;
-      }
-    }
-    current.push(piece);
-    total += piece.length;
+// ---- 1. Blocks: each heading with the text that follows it, and its path of headings (levels 1 to 4).
+const blocks = [];
+const path = {};
+let current = { level: 0, heading: '', lines: [], path: {} };
+for (const line of text.split('\\n')) {
+  const h = line.match(/^(#{1,4}) (.+)$/);
+  if (h) {
+    blocks.push(current);
+    const level = h[1].length;
+    path[level] = h[2].slice(0, 160);
+    for (let l = level + 1; l <= 4; l++) delete path[l];
+    current = { level, heading: line, lines: [], path: { ...path } };
+  } else {
+    current.lines.push(line);
   }
-  if (current.length > 0) chunks.push(current.join(''));
-  return chunks;
+}
+blocks.push(current);
+const hasUnits = blocks.some(b => b.level === 4);
+const deepest = hasUnits ? 4 : Math.max(0, ...blocks.map(b => b.level));
+
+// ---- 2. Segments: the smallest meaningful pieces (units, else deepest sections, else paragraphs).
+const keyOf = p => [p[1], p[2], p[3]].filter(Boolean).join(' > ');
+const unitLabel = h => h.split(' - ')[0].trim().toLowerCase().slice(0, 80);
+let segments = [];
+for (const b of blocks) {
+  const body = b.lines.join('\\n').trim();
+  if (!body && b.level > 0 && b.level < deepest) continue;        // a division title alone: kept in the path of its units
+  const textOf = (b.heading ? b.heading + '\\n\\n' : '') + body;
+  if (!textOf.trim()) continue;
+  if (deepest === 0) {
+    // No heading at all: paragraphs.
+    for (const p of body.split(/\\n{2,}/).map(s => s.trim()).filter(Boolean)) segments.push({ text: p, path: {}, parent: '', units: [] });
+  } else {
+    segments.push({ text: textOf, path: b.path, parent: keyOf(b.path), units: b.level === 4 ? [unitLabel(b.path[4])] : [] });
+  }
 }
 
+// ---- 3. Long segments are split recursively (paragraph, line, sentence, word) with chunkOverlap characters of overlap.
 function recursiveSplit(t, seps) {
   const sep = seps.find(s => s === '' || t.includes(s));
   const rest = seps.slice(seps.indexOf(sep) + 1);
-  const result = [];
-  let small = [];
-  for (const piece of splitKeep(t, sep)) {
-    if (piece.length <= cfg.chunkSize) {
-      small.push(piece);
+  const parts = sep === '' ? [...t] : t.split(sep).map((p, i) => (i === 0 ? p : sep + p)).filter(Boolean);
+  const out = [];
+  let cur = '';
+  for (const p of parts) {
+    if (p.length > cfg.maxChunkSize) { if (cur) out.push(cur); cur = ''; out.push(...recursiveSplit(p, rest)); continue; }
+    if (cur && cur.length + p.length > cfg.maxChunkSize) { out.push(cur); cur = cur.slice(-cfg.chunkOverlap) + p; } else cur += p;
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+segments = segments.flatMap(s => s.text.length <= cfg.maxChunkSize ? [s]
+  : recursiveSplit(s.text, ['\\n\\n', '\\n', '. ', ' ', '']).map((t, i) => ({ ...s, text: (i > 0 && s.path[4] ? '(suite de ' + s.path[4].split(' - ')[0] + ')\\n' : '') + t.trim() })));
+
+// ---- 4. Merge short neighbours of the same division. A small document keeps one unit per passage; if the document needs
+// more than maxPassages passages, the target size grows, then merging is allowed in a larger division (section, chapter…).
+const total = segments.reduce((n, s) => n + s.text.length, 0);
+const parentAt = (s, depth) => [s.path[1], s.path[2], s.path[3]].slice(0, depth).filter(Boolean).join(' > ');
+const merge = (target, depth) => {
+  const out = [];
+  for (const s of segments) {
+    const last = out[out.length - 1];
+    if (last && last.parentKey === parentAt(s, depth) && last.text.length < target && last.text.length + s.text.length <= cfg.maxChunkSize) {
+      last.text += '\\n\\n' + s.text;
+      last.units.push(...s.units);
     } else {
-      if (small.length) { result.push(...merge(small)); small = []; }
-      result.push(...recursiveSplit(piece, rest));
+      out.push({ ...s, units: [...s.units], parentKey: parentAt(s, depth) });
     }
   }
-  if (small.length) result.push(...merge(small));
-  return result;
-}
-
-let chunks = recursiveSplit(text, separators).map(c => c.trim()).filter(c => c.length > 0);
-// A passage shorter than minChunkSize is merged with its neighbour; if the result is longer than maxChunkSize,
-// the two are re-cut in the middle at a paragraph (or sentence) boundary.
-function rebalance(a, b) {
-  const joined = a + '\\n\\n' + b;
-  if (joined.length <= cfg.maxChunkSize) return [joined];
-  const middle = Math.floor(joined.length / 2);
-  let cut = -1;
-  for (const sep of ['\\n# ', '\\n## ', '\\n### ', '\\n#### ', '\\n\\n', '. ', ' ']) {
-    const before = joined.lastIndexOf(sep, middle);
-    const after = joined.indexOf(sep, middle);
-    const best = [before, after].filter(x => x > 0).sort((x, y) => Math.abs(x - middle) - Math.abs(y - middle))[0];
-    if (best !== undefined && Math.abs(best - middle) < joined.length / 4) { cut = best + sep.length; break; }
+  // A passage too short to carry meaning on its own (a lone heading, a one-line article) joins its neighbour.
+  const cleaned = [];
+  for (const c of out) {
+    const last = cleaned[cleaned.length - 1];
+    if (last && c.text.length < cfg.minChunkSize / 2 && last.text.length + c.text.length <= cfg.maxChunkSize) {
+      last.text += '\\n\\n' + c.text;
+      last.units.push(...c.units);
+    } else cleaned.push(c);
   }
-  if (cut < 0) cut = middle;
-  return [joined.slice(0, cut).trim(), joined.slice(cut).trim()];
+  return cleaned;
+};
+let target = cfg.minChunkSize;
+let depth = 3;
+let chunks = merge(target, depth);
+while (chunks.length > cfg.maxPassages && (target < cfg.maxChunkSize || depth > 0)) {
+  if (target < cfg.maxChunkSize) target = Math.min(cfg.maxChunkSize, Math.ceil(target * 1.4));
+  else { depth -= 1; target = cfg.minChunkSize; }
+  chunks = merge(target, depth);
 }
-const sized = [];
-for (const c of chunks) {
-  const prev = sized[sized.length - 1];
-  if (prev !== undefined && (c.length < cfg.minChunkSize || prev.length < cfg.minChunkSize)) sized.splice(-1, 1, ...rebalance(prev, c));
-  else sized.push(c);
-}
-chunks = sized;
 
-// Section label of each passage: the last headings seen before it and the headings it contains.
-const headings = [];
-const re = /^(#{1,4}) (.+)$/gm;
-let m;
-while ((m = re.exec(text)) !== null) headings.push({ pos: m.index, level: m[1].length, title: m[2].slice(0, 120) });
-let cursor = 0;
+// ---- 5. Passages with their section label and the units they contain.
+const unitsPerPassage = chunks.map(c => c.units.length);
+const strategy = (hasUnits ? 'par unité' : deepest > 0 ? 'par section' : 'par paragraphe') + ', regroupement au niveau ' + depth + ', taille cible ' + target
+  + ' car., ' + chunks.length + ' passages' + (hasUnits ? ', ' + (unitsPerPassage.reduce((a, b) => a + b, 0) / chunks.length).toFixed(1) + ' unités par passage en moyenne' : '');
 const limited = cfg.maxChunks > 0 ? chunks.slice(0, cfg.maxChunks) : chunks;
-return limited.map((chunk, i) => {
-  const found = text.indexOf(chunk.slice(0, 200), Math.max(0, cursor - cfg.chunkOverlap - 10));
-  const start = found >= 0 ? found : cursor;
-  cursor = start + chunk.length;
-  const path = {};
-  for (const h of headings) {
-    if (h.pos > start) break;
-    path[h.level] = h.title;
-    for (let l = h.level + 1; l <= 4; l++) delete path[l];
-  }
-  const current = [path[1], path[2], path[3], path[4]].filter(Boolean);
-  const inside = (chunk.match(/^#{1,4} .+$/gm) || []).map(h => h.replace(/^#+ /, '').slice(0, 60))
-    .filter(h => !current.some(c => c.startsWith(h)));
-  const section = current.map(c => c.slice(0, 120)).join(' > ') + (inside.length ? ' | contient : ' + inside.slice(0, 6).join(' ; ') + (inside.length > 6 ? ' ; … (' + inside.length + ' titres)' : '') : '');
-  // Units of the passage (article, fable…), as written in their heading before " - ", in lower case: used by the unit filter.
-  const unitLabel = h => h.split(' - ')[0].trim().toLowerCase().slice(0, 80);
-  const articles = (chunk.match(/^#### .+$/gm) || []).map(h => unitLabel(h.slice(5)));
-  if (path[4]) articles.unshift(unitLabel(path[4]));
+return limited.map((c, i) => {
+  const labels = [c.path[1], c.path[2], c.path[3], c.path[4]].filter(Boolean).map(l => l.slice(0, 120));
+  const others = [...new Set(c.units)].slice(1);
   return { json: {
     passageNumber: i + 1,
     passageTotal: limited.length,
-    section: section.slice(0, 400) || 'non identifiée',
-    articles: '|' + [...new Set(articles)].join('|') + '|',
-    chunk
+    section: (labels.join(' > ') + (others.length ? ' | contient aussi : ' + others.slice(0, 6).join(' ; ') + (others.length > 6 ? ' ; … (' + others.length + ')' : '') : '')).slice(0, 400) || 'non identifiée',
+    articles: '|' + [...new Set(c.units)].join('|') + '|',
+    chunkingStrategy: strategy,
+    chunk: c.text
   } };
 });` },
     position: [1620, -260],
-    notes: 'Recursive chunking: cuts on headings, then paragraphs, lines, sentences and words, 5000 to 10000 characters with overlap.',
+    notes: 'Adaptive chunking: one passage per unit (article, fable…), section or paragraph; short neighbours merged, long units split.',
     notesInFlow: true
   }
 });
@@ -755,7 +762,8 @@ const pdf = $('Extract from File - PDF Text').isExecuted ? $('Extract from File 
 const fileType = pdf ? 'pdf' : String((form.bookFile || {}).filename || 'texte').split('.').pop().toLowerCase();
 const pageCount = pdf && pdf.numpages ? String(pdf.numpages) : '';
 const outline = $('Convert Text to Markdown').first().json.outline || '';
-const documentStats = $('Convert Text to Markdown').first().json.documentStats || '';
+const documentStats = ($('Convert Text to Markdown').first().json.documentStats || '')
+  + ($('Split Recursive Chunks').first().json.chunkingStrategy ? '\\nDécoupage : ' + $('Split Recursive Chunks').first().json.chunkingStrategy : '');
 const clean = (v, max, length) => (Array.isArray(v) ? v : [])
   .map(x => (typeof x === 'object' && x !== null ? [x.source, x.relation, x.target].filter(Boolean).join(' → ') : String(x)))
   .map(x => x.replace(/\\s+/g, ' ').trim().slice(0, length)).filter(Boolean).slice(0, max);
@@ -953,6 +961,7 @@ const ingestion_Summary = node({
         assignments: [
           { id: 'sum-title', name: 'documentTitle', value: expr('{{ $(\'On Form Submission\').first().json.bookTitle }}'), type: 'string' },
           { id: 'sum-passages', name: 'passagesIndexed', value: expr('{{ $(\'Split Recursive Chunks\').all().length }}'), type: 'number' },
+          { id: 'sum-chunking', name: 'chunking', value: expr('{{ $(\'Split Recursive Chunks\').first().json.chunkingStrategy }}'), type: 'string' },
           { id: 'sum-stats', name: 'documentStats', value: expr('{{ $(\'Convert Text to Markdown\').first().json.documentStats }}'), type: 'string' },
           { id: 'sum-status', name: 'status', value: 'Indexation terminée', type: 'string' }
         ]
@@ -1003,13 +1012,13 @@ const configuration_Answering = node({
           { id: 'ans-table-name', name: 'tableName', value: 'documents', type: 'string' },
           { id: 'ans-history', name: 'historyMessages', value: 6, type: 'number' },
           { id: 'ans-retention', name: 'historyRetentionDays', value: 30, type: 'number' },
-          { id: 'ans-top-k', name: 'searchTopK', value: 6, type: 'number' },
-          { id: 'ans-keyword-k', name: 'keywordTopK', value: 4, type: 'number' },
+          { id: 'ans-top-k', name: 'searchTopK', value: 8, type: 'number' },
+          { id: 'ans-keyword-k', name: 'keywordTopK', value: 6, type: 'number' },
           { id: 'ans-graph-facts', name: 'graphFactsLimit', value: 25, type: 'number' },
           { id: 'ans-graph-passages', name: 'graphPassages', value: 3, type: 'number' },
           { id: 'ans-preview', name: 'rerankPreviewLength', value: 10000, type: 'number' },
           { id: 'ans-min-score', name: 'minRerankScore', value: 0.3, type: 'number' },
-          { id: 'ans-keep', name: 'passagesKept', value: 3, type: 'number' },
+          { id: 'ans-keep', name: 'passagesKept', value: 5, type: 'number' },
           { id: 'ans-max-len', name: 'maxQuestionLength', value: 1000, type: 'number' }
         ]
       },
