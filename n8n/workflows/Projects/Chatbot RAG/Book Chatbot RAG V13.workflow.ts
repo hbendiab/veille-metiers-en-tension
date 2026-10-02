@@ -130,6 +130,106 @@ const generation_Group = node({
   }
 });
 
+const extraction_guide = node({
+  type: 'n8n-nodes-base.stickyNote',
+  version: 1,
+  config: {
+    name: 'Extraction Guide',
+    parameters: { content: '### Nodes of this step\n- **On Form Submission**: form to upload a document (PDF, TXT, Markdown or HTML) with its title and author.\n- **Configuration - Ingestion**: all ingestion settings: passage sizes, maximum passages per document, batch size, pause.\n- **If - PDF File**: sends PDF files to the PDF extraction and the other files to the text extraction.\n- **Extract from File - PDF Text / Text**: read the text of the file (and the number of pages of a PDF).\n- **Postgres - Prepare Storage**: updates the search function, then deletes the old passages of this document (same title = new version).\n- **Clean Text**: removes page headers, footers, footnotes and hyphenation, converts HTML, and summarizes the layout for Gemini.\n- **Gemini - Analyze Structure**: finds the type of document, its divisions (book, chapter, section…) and its units (article, fable…).\n- **Convert Text to Markdown**: applies this structure as Markdown headings, then computes the outline and the statistics.', height: 276, width: 1560, color: 7 },
+    position: [-64, -764]
+  }
+});
+
+const chunking_guide = node({
+  type: 'n8n-nodes-base.stickyNote',
+  version: 1,
+  config: {
+    name: 'Chunking Guide',
+    parameters: { content: '### Node of this step\n- **Split Recursive Chunks**: one passage per unit (article, fable…), else per section, else per paragraph. Short neighbours of the same division are merged, long units split with overlap: 400 to 4000 characters, at most 300 passages per document.', height: 204, width: 420, color: 7 },
+    position: [1520, -692]
+  }
+});
+
+const augmentation_guide = node({
+  type: 'n8n-nodes-base.stickyNote',
+  version: 1,
+  config: {
+    name: 'Augmentation Guide',
+    parameters: { content: '### Nodes of this step\n- **Loop Over Passages**: processes the passages 16 at a time (Gemini quota); when all are done, goes to Ingestion Summary.\n- **Group Batch Passages**: puts the passages of the batch in a single prompt.\n- **Gemini - Augment Passages**: writes for each passage a context, 3 hypothetical questions, keywords, entities and relations.\n- **Build Augmented Passages**: splits the answer per passage and adds it as a header above the text to embed.\n- **Ingestion Summary**: final report: document, passages indexed, chunking strategy and statistics.', height: 252, width: 840, color: 7 },
+    position: [1808, -740]
+  }
+});
+
+const vectorisation_guide = node({
+  type: 'n8n-nodes-base.stickyNote',
+  version: 1,
+  config: {
+    name: 'Vectorisation Guide',
+    parameters: { content: '### Nodes of this step\n- **Supabase Vector Store - Insert Passages**: stores each passage with its vector and its metadata in the documents table.\n- **Google Gemini - Embed Passages**: turns each passage into a vector (gemini-embedding-2, 3072 dimensions).\n- **Default Data Loader**: builds the stored document: text plus metadata (section, keywords, units…).\n- **Recursive Text Splitter - No Re-Split**: required by n8n, set so that it never cuts again (passages are already cut).\n- **Postgres - Save Graph**: saves the relations (source → relation → target) of the batch in graph_relations.\n- **Wait - Gemini Quota**: 15 s pause before the next batch.', height: 324, width: 780, color: 7 },
+    position: [2672, -812]
+  }
+});
+
+const input_guide = node({
+  type: 'n8n-nodes-base.stickyNote',
+  version: 1,
+  config: {
+    name: 'Input Guide',
+    parameters: { content: '### Nodes of this step\n- **When Chat Message Received**: the question typed in the n8n chat.\n- **Configuration - Answering**: answering settings: history, number of results, reranking threshold, passages kept, full document limit.', height: 156, width: 680, color: 7 },
+    position: [-64, 952]
+  }
+});
+
+const context_guide = node({
+  type: 'n8n-nodes-base.stickyNote',
+  version: 1,
+  config: {
+    name: 'Context Guide',
+    parameters: { content: '### Nodes of this step\n- **Postgres - Get Session Messages**: last messages of this conversation.\n- **Postgres - List Documents**: indexed documents with format, pages, outline and statistics.\n- **Build Conversation**: checks the question, builds the history and the description of the documents.\n- **If - Empty Conversation**: first message: straight to the routing; follow-up: rewritten first.', height: 180, width: 900, color: 7 },
+    position: [640, 952]
+  }
+});
+
+const routing_guide = node({
+  type: 'n8n-nodes-base.stickyNote',
+  version: 1,
+  config: {
+    name: 'Routing Guide',
+    parameters: { content: '### Nodes of this step\n- **Gemini - Rewrite with History**: rewrites a follow-up question so that it is understandable on its own.\n- **Gemini - Route Question**: chooses the document and the scope (passage, list, document), writes the search query, keywords, units and entities.\n- **Parse Routing**: checks this plan; the question itself is used if Gemini did not return valid JSON.', height: 228, width: 680, color: 7 },
+    position: [1568, 952]
+  }
+});
+
+const search_guide = node({
+  type: 'n8n-nodes-base.stickyNote',
+  version: 1,
+  config: {
+    name: 'Search Guide',
+    parameters: { content: '### Nodes of this step\n- **Supabase Vector Store - Search Passages + Embed Query**: passages closest in meaning, in the chosen document.\n- **Postgres - Search by Keywords**: passages whose keywords or units (article 5…) match.\n- **Postgres - Search Graph**: relations around the entities of the question and the passages they come from.\n- **Postgres - Get Full Document**: for a list question, the whole document if it is small enough.', height: 276, width: 680, color: 7 },
+    position: [2272, 952]
+  }
+});
+
+const reranking_guide = node({
+  type: 'n8n-nodes-base.stickyNote',
+  version: 1,
+  config: {
+    name: 'Reranking Guide',
+    parameters: { content: '### Nodes of this step\n- **Merge Candidates**: merges the results without duplicates (or takes the whole document) and lists the graph facts.\n- **Gemini - Rerank Passages**: scores each candidate passage from 0 to 1.\n- **Select Best Passages**: keeps the 5 best (all of them for a whole document, the 2 first if all scores are 0) and states what was covered.', height: 204, width: 680, color: 7 },
+    position: [2960, 984]
+  }
+});
+
+const generation_guide = node({
+  type: 'n8n-nodes-base.stickyNote',
+  version: 1,
+  config: {
+    name: 'Generation Guide',
+    parameters: { content: '### Nodes of this step\n- **Gemini - Generate Answer**: answers only from the passages, cites [n], says when it does not know, makes a list when asked.\n- **Postgres - Save Messages**: saves the question and the answer (history kept 30 days).\n- **Format Chat Reply**: adds only the sources cited in the answer, or a fallback message if Gemini failed.', height: 228, width: 680, color: 7 },
+    position: [3664, 952]
+  }
+});
+
 // ─────────────────────────────── Part 1 - Ingestion ───────────────────────────────
 
 const on_Form_Submission = trigger({
@@ -182,7 +282,7 @@ const configuration_Ingestion = node({
       options: { stripBinary: false }
     },
     position: [220, -260],
-    notes: 'Passages of 400 to 4000 characters following the structure, at most maxPassages per document. maxChunks = 0 means the whole book. Passages are augmented (one Gemini call) and embedded 8 at a time, with a 15 s pause: the free Gemini tier also limits tokens per minute.',
+    notes: 'Ingestion settings: passages of 400 to 4000 characters following the structure, at most 300 per document, 16 per batch, 15 s pause (free Gemini quota).',
     notesInFlow: true
   }
 });
@@ -545,7 +645,7 @@ const documentStats = [
 ].filter(Boolean).join('\\n');
 return [{ json: { markdown: out.join('\\n\\n'), outline, documentStats, unitName, profileUsed: !!profile, rulesKept: divisions.length + (unit && unit.re ? 1 : 0) } }];` },
     position: [1320, -260],
-    notes: 'Markdown: applies the structure found by Gemini (divisions #, ##, ###, units ####), computes the outline and statistics.',
+    notes: 'Applies the structure found by Gemini (divisions #, ##, ###, units ####) and computes the outline and the statistics.',
     notesInFlow: true
   }
 });
@@ -668,7 +768,7 @@ return limited.map((c, i) => {
   } };
 });` },
     position: [1620, -260],
-    notes: 'Adaptive chunking: one passage per unit (article, fable…), section or paragraph; short neighbours merged, long units split.',
+    notes: 'Adaptive chunking: one passage per unit, section or paragraph; short neighbours merged, long units split.',
     notesInFlow: true
   }
 });
@@ -1071,7 +1171,7 @@ from documents group by metadata->>'bookId' order by 2`,
     alwaysOutputData: true,
     onError: 'continueRegularOutput',
     position: [920, 560],
-    notes: 'Context: lists the indexed documents (title, author, number of passages).',
+    notes: 'Context: lists the indexed documents with format, pages, outline and statistics.',
     notesInFlow: true
   }
 });
@@ -1433,7 +1533,7 @@ return [{ json: {
   candidatesText: fullDocument.length ? 'DOCUMENT COMPLET : pas de classement nécessaire.' : candidates.length ? candidates.map(preview).join('\\n\\n---\\n\\n') : 'AUCUN PASSAGE'
 } }];` },
     position: [3040, 560],
-    notes: 'Puts the three result lists together without duplicates and turns the graph relations into facts.',
+    notes: 'Merges the results without duplicates (or takes the whole document for a list question) and lists the graph facts.',
     notesInFlow: true
   }
 });
@@ -1522,7 +1622,7 @@ return [{ json: {
   sourcesText: kept.length ? '\\n\\n**Sources :** ' + kept.map((k, i) => '[' + (i + 1) + '] ' + label(k).slice(0, 200)).join(' ; ') : ''
 } }];` },
     position: [3480, 560],
-    notes: 'Keeps the best scored passages (search order if the reranking failed) and builds the sources.',
+    notes: 'Keeps the best scored passages (all of them for a whole document) and builds the coverage and the sources.',
     notesInFlow: true
   }
 });
@@ -1596,7 +1696,7 @@ const format_Chat_Reply = node({
       options: {}
     },
     position: [4160, 560],
-    notes: 'Formats the chat reply with the list of sources, or a fallback message if Gemini failed.',
+    notes: 'Adds only the sources cited in the answer, or a fallback message if Gemini failed.',
     notesInFlow: true
   }
 });
@@ -1621,6 +1721,16 @@ export default wf
   .add(search_Group)
   .add(reranking_Group)
   .add(generation_Group)
+  .add(extraction_guide)
+  .add(chunking_guide)
+  .add(augmentation_guide)
+  .add(vectorisation_guide)
+  .add(input_guide)
+  .add(context_guide)
+  .add(routing_guide)
+  .add(search_guide)
+  .add(reranking_guide)
+  .add(generation_guide)
   .add(on_Form_Submission)
   .to(configuration_Ingestion)
   .to(if_PDF_File

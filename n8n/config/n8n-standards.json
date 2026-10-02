@@ -117,7 +117,11 @@
       "maxWindows",
       "OCR",
       "PDFs",
-      "Utils"
+      "Utils",
+      "structure-aware",
+      "maxPassages",
+      "fullDocumentMaxChars",
+      "gemini-embedding-"
     ],
     "_comment_allowedWords": "Add custom words here that are specific to your workflows to prevent spelling warnings.",
     "errorMessage": "Text, names, and variables must be written in English."
