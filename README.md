@@ -49,6 +49,8 @@ veille-metiers-en-tension/
 | **Job Market Watch** | Collecte, calcul des indicateurs, rapport | Chaque lundi à 7h + formulaire manuel (1 métier, 1 zone) | 🟡 Étape 1 sur 7 |
 | **Book Chatbot RAG V13** | Chatbot qui répond aux questions sur un ou plusieurs documents de non-fiction (PDF, TXT, Markdown, HTML) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
 
+**Modifier un workflow existant.** `n8ncli push` ne peut que créer des workflows sur cette instance, faute de clé API n8n. Pour modifier un workflow sur place, [scripts/n8n_mcp.mjs](scripts/n8n_mcp.mjs) appelle l'outil `update_workflow` du serveur MCP de n8n, avec le jeton de n8ncli. Il sert ensuite à vérifier le résultat avec `n8ncli pull`.
+
 Les workflows sont écrits en TypeScript (format `@n8n/workflow-sdk`) et synchronisés avec l'instance n8n Cloud par le CLI **n8ncli**. Le fichier `.workflow.ts` est la sauvegarde versionnée du workflow : il peut être renvoyé dans n8n à tout moment avec `n8ncli push`, même après la fin de l'essai gratuit.
 
 ### Book Chatbot RAG V13
@@ -61,6 +63,10 @@ Un workflow, deux parties. Chaque étape est encadrée par une sticky note grise
 | **2. Answering** | *When Chat Message Received* | **Input** : nettoyage de la question → **Context** : messages de la session lus dans `chat_messages` et liste des documents indexés (*Postgres - List Documents*) ; *If - Empty Conversation* : sinon, Gemini réécrit la question pour qu'elle se comprenne sans l'historique → **Routing** : Gemini Flash Lite **choisit le document** visé par la question (ou tous) et produit la requête de recherche, les mots-clés et les filtres d'articles → **Search** (filtrée sur le document choisi) : recherche vectorielle, recherche par mots-clés et articles, et **recherche dans le graphe** (*Postgres - Search Graph* : relations autour des entités de la question, puis un saut vers leurs voisines, et les passages les plus liés), sans doublons → **Reranking** : Gemini Flash Lite note chaque passage de 0 à 1 ; les 3 meilleurs au-dessus de 0,3 sont gardés → **Generation** : Gemini Flash Lite répond à partir des passages et des faits du graphe (balise `<faits>`), avec citations [1], [2], puis l'échange est enregistré |
 
 Choix principaux :
+- **Questions sur le document lui-même** (nombre de pages, plan, nombre de chapitres) :
+  - à l'ingestion, le format, le nombre de pages (PDF) et le plan (titres `#` et `##`) sont enregistrés avec les passages ;
+  - *Postgres - List Documents* les relit, et la génération les reçoit dans une balise `<documents>`.
+  - Le message « aucun document indexé » ne s'affiche plus que s'il n'y a vraiment aucun document. Avant, il apparaissait dès que le reranking écartait tous les passages.
 - **N'importe quel document** :
   - chaque titre du formulaire est un document. Un nouveau titre s'ajoute aux autres, le même titre remplace l'ancienne version ;
   - le Routing choisit le document à partir de la liste des documents indexés (testé : « article 5 du RGPD » → RGPD, « Neil Armstrong » → Apollo 11, « article 5 » sans précision → tous les documents) ;
