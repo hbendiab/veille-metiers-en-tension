@@ -985,7 +985,7 @@ const configuration_Answering = node({
           { id: 'ans-keyword-k', name: 'keywordTopK', value: 4, type: 'number' },
           { id: 'ans-graph-facts', name: 'graphFactsLimit', value: 25, type: 'number' },
           { id: 'ans-graph-passages', name: 'graphPassages', value: 3, type: 'number' },
-          { id: 'ans-preview', name: 'rerankPreviewLength', value: 1200, type: 'number' },
+          { id: 'ans-preview', name: 'rerankPreviewLength', value: 10000, type: 'number' },
           { id: 'ans-min-score', name: 'minRerankScore', value: 0.3, type: 'number' },
           { id: 'ans-keep', name: 'passagesKept', value: 3, type: 'number' },
           { id: 'ans-max-len', name: 'maxQuestionLength', value: 1000, type: 'number' }
@@ -1423,10 +1423,13 @@ try {
   // scores stays empty: fallback below
 }
 const rerankedByAi = data.candidates.some(c => Number.isFinite(scores[c.n]));
-const kept = (rerankedByAi
+let kept = (rerankedByAi
   ? data.candidates.filter(c => Number.isFinite(scores[c.n]) && scores[c.n] >= cfg.minRerankScore).sort((a, b) => scores[b.n] - scores[a.n])
   : data.candidates
 ).slice(0, cfg.passagesKept);
+// Safety net: if the reranking discarded everything, the 2 best search results still go to the answer,
+// which says "Je ne trouve pas" itself when they do not answer the question.
+if (kept.length === 0) kept.push(...data.candidates.slice(0, 2));
 
 const label = k => (k.metadata.bookTitle ? k.metadata.bookTitle + ' > ' : '') + (k.metadata.section || 'section non identifiée') + ', passage ' + k.metadata.passageNumber;
 return [{ json: {
