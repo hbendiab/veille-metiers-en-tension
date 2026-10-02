@@ -28,7 +28,7 @@ veille-metiers-en-tension/
 │   ├── config/                (configuration du CLI, standards de nommage, mise en page)
 │   └── workflows/
 │       ├── Job Market Watch.workflow.ts   (veille métiers en tension)
-│       └── Book Chatbot RAG V10.workflow.ts   (chatbot RAG sur un livre)
+│       └── Book Chatbot RAG V11.workflow.ts   (chatbot RAG sur un livre)
 ├── supabase/setup.sql         ← table vectorielle du chatbot RAG
 ├── scripts/                   ← création des credentials sans les écrire dans le code
 ├── skills/                    ← les skills IA utilisés pendant le projet
@@ -47,11 +47,11 @@ veille-metiers-en-tension/
 | Workflow | Rôle | Déclencheurs | Statut |
 |---|---|---|---|
 | **Job Market Watch** | Collecte, calcul des indicateurs, rapport | Chaque lundi à 7h + formulaire manuel (1 métier, 1 zone) | 🟡 Étape 1 sur 7 |
-| **Book Chatbot RAG V10** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
+| **Book Chatbot RAG V11** | Chatbot qui répond aux questions sur un livre de non-fiction (PDF) | Formulaire (ajout du livre) + chat n8n (questions) | ✅ Construit, à tester avec un livre |
 
 Les workflows sont écrits en TypeScript (format `@n8n/workflow-sdk`) et synchronisés avec l'instance n8n Cloud par le CLI **n8ncli**. Le fichier `.workflow.ts` est la sauvegarde versionnée du workflow : il peut être renvoyé dans n8n à tout moment avec `n8ncli push`, même après la fin de l'essai gratuit.
 
-### Book Chatbot RAG V10
+### Book Chatbot RAG V11
 
 Un workflow, deux parties. Chaque étape est encadrée par une sticky note grise sur la toile n8n, et une sticky note bleue décrit les specs.
 
@@ -70,7 +70,7 @@ Choix principaux :
   - l'augmentation se fait en **un appel Gemini par lot de 8 passages** (environ 7 s, testé : 8 sur 8 enrichis), au lieu d'un appel par passage ;
   - l'ingestion de l'AI Act prend environ 3 minutes ;
   - une réponse dans le chat prend environ 5 secondes.
-- **Stockage** : Supabase (pgvector), créé par [supabase/setup.sql](supabase/setup.sql) :
+- **Stockage** : Supabase (pgvector), créé **une seule fois** en exécutant [supabase/setup.sql](supabase/setup.sql) dans le SQL Editor de Supabase. Le workflow ne fait que supprimer l'ancienne version d'un livre avant de le réindexer, avec le nœud *Postgres - Delete Previous Passages*. Contenu :
   - table `documents` : `content` est le chunk, avec `embedding`, `keywords` et `metadata` (section, articles, contexte, entités, relations…) ;
   - table `chat_messages` : historique, purgé après 30 jours ;
   - fonction `match_documents`.

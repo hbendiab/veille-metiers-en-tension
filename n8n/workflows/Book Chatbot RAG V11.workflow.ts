@@ -6,7 +6,7 @@ const specs_Note = node({
   config: {
     name: 'Specs Note',
     parameters: {
-      content: '## Book Chatbot RAG V10\n\n**Goal:** chat with a non-fiction book (PDF).\n\n**Part 1 - Ingestion** (form): extraction to Markdown > recursive chunking (5000 to 10000 characters, overlap) > augmentation by Gemini (context, hypothetical questions, keywords, entities and relations) > vectorisation.\n\n**Part 2 - Answering** (chat): input > context (session messages) > routing (query, keywords, article filters) > search (vectors + keywords) > reranking (Gemini Flash Lite) > generation.\n\n**Models:** native Google Gemini nodes (Message a Model, no sub-node), all on Gemini 3.5 Flash Lite: about 1 second per call (pinned version, no -latest alias). Gemini embedding 2 (only remaining sub-node: n8n has no native embedding node) (vectors, up to 8192 tokens per passage).\n\n**Store:** Supabase (pgvector), tables documents and chat_messages (see supabase/setup.sql). Re-ingesting a book replaces its passages.\n\n**Emergency stop:** deactivate the workflow.',
+      content: '## Book Chatbot RAG V11\n\n**Goal:** chat with a non-fiction book (PDF).\n\n**Part 1 - Ingestion** (form): extraction to Markdown > recursive chunking (5000 to 10000 characters, overlap) > augmentation by Gemini (context, hypothetical questions, keywords, entities and relations) > vectorisation.\n\n**Part 2 - Answering** (chat): input > context (session messages) > routing (query, keywords, article filters) > search (vectors + keywords) > reranking (Gemini Flash Lite) > generation.\n\n**Models:** native Google Gemini nodes (Message a Model, no sub-node), all on Gemini 3.5 Flash Lite: about 1 second per call (pinned version, no -latest alias). Gemini embedding 2 (only remaining sub-node: n8n has no native embedding node) (vectors, up to 8192 tokens per passage).\n\n**Store:** Supabase (pgvector), tables documents and chat_messages, created once by supabase/setup.sql. Re-ingesting a book replaces its passages.\n\n**Emergency stop:** deactivate the workflow.',
       height: 520,
       width: 480,
       color: 2
@@ -198,15 +198,15 @@ const extract_PDF_Text = node({
   }
 });
 
-const postgres_Prepare_Tables = node({
+const postgres_Delete_Previous_Passages = node({
   type: 'n8n-nodes-base.postgres',
   version: 2.7,
   config: {
-    name: 'Postgres - Prepare Tables',
+    name: 'Postgres - Delete Previous Passages',
     parameters: {
       operation: 'executeQuery',
-      query: expr('-- Creates the tables and the search function if missing (same as supabase/setup.sql), then removes the passages of this book already stored.\n-- bookId only contains a-z, 0-9 and dashes (computed in Configuration - Ingestion), so it is safe in the SQL literal.\nDO $setup$\nBEGIN\n  EXECUTE \'create extension if not exists vector\';\n  EXECUTE \'create table if not exists documents (id bigserial primary key, content text, metadata jsonb, embedding vector(3072))\';\n  EXECUTE \'create index if not exists documents_book_id_idx on documents ((metadata->>\'\'bookId\'\'))\';\n  -- Keywords as a real column, computed by Postgres from the metadata (always in sync).\n  EXECUTE \'alter table documents add column if not exists keywords text[] generated always as (string_to_array(nullif(metadata->>\'\'keywords\'\', \'\'\'\'), \'\', \'\')) stored\';\n  EXECUTE \'create index if not exists documents_keywords_idx on documents using gin (keywords)\';\n  EXECUTE \'alter table documents enable row level security\';\n  -- Chat history used by the Context step of the answering part.\n  EXECUTE \'create table if not exists chat_messages (id bigserial primary key, session_id text not null, role text not null, message text not null, created_at timestamptz not null default now())\';\n  EXECUTE \'create index if not exists chat_messages_session_idx on chat_messages (session_id, id)\';\n  EXECUTE \'alter table chat_messages enable row level security\';\n  EXECUTE $fn$\n    create or replace function match_documents (query_embedding vector(3072), match_count int default null, filter jsonb default \'{}\')\n    returns table (id bigint, content text, metadata jsonb, similarity float)\n    language plpgsql as $body$\n    begin\n      return query\n      select documents.id, documents.content, documents.metadata, 1 - (documents.embedding <=> query_embedding) as similarity\n      from documents\n      where documents.metadata @> filter\n      order by documents.embedding <=> query_embedding\n      limit match_count;\n    end;\n    $body$;\n  $fn$;\n  EXECUTE format(\'delete from documents where metadata->>\'\'bookId\'\' = %L\', \'{{ $(\'Configuration - Ingestion\').first().json.bookId }}\');\nEND\n$setup$;'),
-      options: {}
+      query: '-- Re-ingesting a book replaces its passages: no duplicates. Tables are created once by supabase/setup.sql.\ndelete from documents where metadata->>\'bookId\' = $1',
+      options: { queryReplacement: expr('{{ [ $(\'Configuration - Ingestion\').first().json.bookId ] }}') }
     },
     credentials: { postgres: newCredential('Postgres account', 'AAsHauLCknL0ZLaC') },
     executeOnce: true,
@@ -215,7 +215,7 @@ const postgres_Prepare_Tables = node({
     maxTries: 3,
     waitBetweenTries: 3000,
     position: [660, -260],
-    notes: 'Creates the Supabase tables if missing and deletes the passages of this book already stored, so a re-ingestion never creates duplicates.',
+    notes: 'Deletes the passages of this book already stored, so a re-ingestion never creates duplicates.',
     notesInFlow: true
   }
 });
@@ -673,25 +673,6 @@ const configuration_Answering = node({
   }
 });
 
-const validate_Question = node({
-  type: 'n8n-nodes-base.code',
-  version: 2,
-  config: {
-    name: 'Validate Question',
-    parameters: { jsCode: `// Input: cleans the question and rejects empty or oversized messages.
-const cfg = $input.first().json;
-const question = String(cfg.chatInput || '').replace(/\\s+/g, ' ').trim();
-if (question.length === 0) throw new Error('Question vide.');
-return [{ json: {
-  sessionId: String(cfg.sessionId || 'sans-session'),
-  question: question.slice(0, cfg.maxQuestionLength)
-} }];` },
-    position: [440, 560],
-    notes: 'Input: trims the question and caps its length.',
-    notesInFlow: true
-  }
-});
-
 const postgres_Get_Session_Messages = node({
   type: 'n8n-nodes-base.postgres',
   version: 2.7,
@@ -700,7 +681,7 @@ const postgres_Get_Session_Messages = node({
     parameters: {
       operation: 'executeQuery',
       query: 'select role, message from chat_messages where session_id = $1 order by id desc limit $2',
-      options: { queryReplacement: expr('{{ [ $json.sessionId, $(\'Configuration - Answering\').first().json.historyMessages ] }}') }
+      options: { queryReplacement: expr('{{ [ String($json.sessionId || \'sans-session\'), $json.historyMessages ] }}') }
     },
     credentials: { postgres: newCredential('Postgres account', 'AAsHauLCknL0ZLaC') },
     alwaysOutputData: true,
@@ -716,14 +697,22 @@ const build_Conversation = node({
   version: 2,
   config: {
     name: 'Build Conversation',
-    parameters: { jsCode: `// Context: rebuilds the recent messages of this chat session, oldest first.
+    parameters: { jsCode: `// Input + Context: checks the question, then rebuilds the recent messages of this chat session, oldest first.
+const cfg = $('Configuration - Answering').first().json;
+const question = String(cfg.chatInput || '').replace(/\\s+/g, ' ').trim();
+if (question.length === 0) throw new Error('Question vide.');
 const rows = $input.all().map(i => i.json).filter(r => r.role && r.message);
 const history = rows.reverse()
   .map(r => (r.role === 'user' ? 'Utilisateur : ' : 'Assistant : ') + String(r.message).slice(0, 1500))
   .join('\\n');
-return [{ json: { ...$('Validate Question').first().json, messageCount: rows.length, history } }];` },
+return [{ json: {
+  sessionId: String(cfg.sessionId || 'sans-session'),
+  question: question.slice(0, cfg.maxQuestionLength),
+  messageCount: rows.length,
+  history
+} }];` },
     position: [920, 560],
-    notes: 'Puts the session messages in order as a text history.',
+    notes: 'Checks the question (not empty, length capped) and puts the session messages in order as a text history.',
     notesInFlow: true
   }
 });
@@ -1064,7 +1053,7 @@ const postgres_Save_Messages = node({
       query: `-- Saves the question and the answer of this session. Messages older than historyRetentionDays are deleted (data minimisation).
 with purge as (delete from chat_messages where created_at < now() - interval '1 day' * $4)
 insert into chat_messages (session_id, role, message) values ($1, 'user', $2), ($1, 'assistant', $3)`,
-      options: { queryReplacement: expr('{{ [ $(\'Validate Question\').first().json.sessionId, $(\'Validate Question\').first().json.question, $json.mergedResponse || \'\', $(\'Configuration - Answering\').first().json.historyRetentionDays ] }}') }
+      options: { queryReplacement: expr('{{ [ $(\'Build Conversation\').first().json.sessionId, $(\'Build Conversation\').first().json.question, $json.mergedResponse || \'\', $(\'Configuration - Answering\').first().json.historyRetentionDays ] }}') }
     },
     credentials: { postgres: newCredential('Postgres account', 'AAsHauLCknL0ZLaC') },
     executeOnce: true,
@@ -1100,7 +1089,7 @@ const format_Chat_Reply = node({
 
 // ─────────────────────────────── Workflow ───────────────────────────────
 
-const wf = workflow('Book Chatbot RAG V10', 'Book Chatbot RAG V10', {
+const wf = workflow('Book Chatbot RAG V11', 'Book Chatbot RAG V11', {
   description: 'Chatbot that answers questions about a non-fiction book (PDF) with retrieval-augmented generation. Part 1 ingests the book through a form (extraction to Markdown, recursive chunking, augmentation by Gemini, vectorisation into Supabase). Part 2 answers chat messages (input, context, routing, search, reranking, generation) with Google Gemini.',
   executionOrder: 'v1'
 });
@@ -1121,7 +1110,7 @@ export default wf
   .add(on_Form_Submission)
   .to(configuration_Ingestion)
   .to(extract_PDF_Text)
-  .to(postgres_Prepare_Tables)
+  .to(postgres_Delete_Previous_Passages)
   .to(clean_Text)
   .to(convert_To_Markdown)
   .to(split_Recursive_Chunks)
@@ -1130,7 +1119,6 @@ export default wf
     .onEachBatch(group_Batch_Passages.to(gemini_Augment_Passage.to(build_Augmented_Passage.to(vector_Store_Insert.to(wait_Gemini_Quota.to(nextBatch(loop_Over_Passages))))))))
   .add(when_Chat_Message_Received)
   .to(configuration_Answering)
-  .to(validate_Question)
   .to(postgres_Get_Session_Messages)
   .to(build_Conversation)
   .to(if_Empty_Conversation
