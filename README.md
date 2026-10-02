@@ -71,6 +71,12 @@ Choix principaux :
   - chaque titre du formulaire est un document. Un nouveau titre s'ajoute aux autres, le même titre remplace l'ancienne version ;
   - le Routing choisit le document à partir de la liste des documents indexés (testé : « article 5 du RGPD » → RGPD, « Neil Armstrong » → Apollo 11, « article 5 » sans précision → tous les documents) ;
   - les sources affichent le titre du document.
+  - **PDF de poèmes ou de fables** (lignes courtes) :
+    - les vers gardent leurs retours à la ligne ;
+    - un titre doit suivre un saut de page, pour qu'un vers comme « Le fabricateur souverain » ne soit pas pris pour un titre ;
+    - les en-têtes et pieds de page répétés (« Page 7 / 25 », nom du site, nom de l'auteur) sont retirés ;
+    - le découpage coupe de préférence entre deux titres, pour qu'une fable reste entière avec sa morale.
+    - Testé sur le Livre I des Fables de La Fontaine : 18 fables reconnues, 4 passages.
   - Détection des titres testée sur l'AI Act en PDF (inchangé : 99 passages), Apollo 11 en HTML Wikipédia (titres exacts) et le cours n8n en Markdown.
 - **GraphRAG « local »**, stocké dans Supabase (pas de Neo4j : ce serait un service de plus, sans nœud natif dans n8n) :
   - les entités et relations sont extraites dans le même appel Gemini que l'augmentation, donc aucun appel de plus ;

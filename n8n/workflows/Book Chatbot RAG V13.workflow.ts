@@ -299,10 +299,18 @@ t = t.replace(/^(Journal officiel|de l’Union européenne|FR|Série L|\\d{4}\\/
 t = t.replace(/^\\(\\d{1,3}\\) (JO [CL] |Règlement |Directive |Décision |Recommandation |Position |Communication |Avis ).*$/gm, ''); // footnotes
 t = t.replace(/\\s*\\(\\s*\\n\\s*\\d{1,3}\\s*\\n\\s*\\)/g, '');                 // footnote markers split over lines: ( 12 )
 t = t.replace(/^\\s*\\d{1,4}(\\/\\d{1,4})?\\s*$/gm, '');                    // lone page numbers
+t = t.replace(/^\\s*(page|p\\.)?\\s*\\d{1,4}\\s*(\\/|sur|of)\\s*\\d{1,4}\\s*$/gim, '');      // "Page 7 / 25"
+// Running headers and footers: short lines repeated on many pages (site name, book title, author).
+const counts = {};
+for (const line of t.split('\\n')) { const l = line.trim(); if (l.length >= 3 && l.length <= 100 && !l.startsWith('#')) counts[l] = (counts[l] || 0) + 1; }
+// Only in PDF files, and only label-like lines (no final punctuation, at most 10 words), so repeated sentences are kept.
+const repeated = new Set(source === 'Extract from File - PDF Text' ? Object.keys(counts).filter(l => counts[l] >= 4
+  && !/[.;:,!?»)]$/.test(l) && l.split(' ').length <= 10 && !/^(article|chapitre|chapter|section|annexe|annex)\\b/i.test(l)) : []);
+t = t.split('\\n').map(line => (repeated.has(line.trim()) ? '' : line)).join('\\n');
 t = t.replace(/(\\p{Ll})-\\n(\\p{Ll})/gu, '$1$2');                        // words cut by a hyphen at line end
 t = t.replace(/[­​﻿]/g, '');                            // invisible characters
-t = t.replace(/[ \\t]+/g, ' ').replace(/ *\\n */g, '\\n').replace(/\\n{2,}/g, '\\n').trim();
-return [{ json: { cleanText: t, removedCharacters: text.length - t.length } }];` },
+t = t.replace(/[ \\t]+/g, ' ').replace(/ *\\n */g, '\\n').replace(/\\n{3,}/g, '\\n\\n').trim();   // a blank line marks a page or paragraph break
+return [{ json: { cleanText: t, removedCharacters: text.length - t.length, removedRepeatedLines: [...repeated].slice(0, 20) } }];` },
     position: [1100, -260],
     notes: 'Cleaning: removes page headers and footers, footnotes, page numbers and hyphenation.',
     notesInFlow: true
@@ -317,7 +325,10 @@ const convert_To_Markdown = node({
     parameters: { jsCode: `// Extraction to Markdown: turns the structure of any document into Markdown headings and joins the lines into paragraphs.
 // Detected: existing Markdown headings, named parts (chapter, part, annex, section, article), numbered titles (1.2 Title)
 // and short lines that look like a title (capital letter, no final punctuation, a sentence starts on the next line).
+// Verse (poems, fables: short lines) keeps its line breaks, and a title there must follow a page or paragraph break.
 const lines = $input.first().json.cleanText.split('\\n').map(l => l.trim());
+const lengths = lines.filter(l => l).map(l => l.length).sort((a, b) => a - b);
+const verse = lengths.length > 0 && lengths[Math.floor(lengths.length / 2)] < 50;
 const markdownHeading = /^(#{1,6})\\s+(.+)$/;
 const named = [
   { level: '# ', re: /^(CHAPITRE|CHAPTER|TITRE|PARTIE|PART|LIVRE|BOOK|ANNEXE|ANNEX|APPENDIX)\\s+([IVXLC]+|\\d+|premier|première|unique)\\b(\\s*[-–—:.]\\s*.{1,100})?$/i },
@@ -340,13 +351,19 @@ const afterBreak = (prev, previousWasHeading) => endsSentence(prev) || previousW
 const out = [];
 let paragraph = '';
 let previousWasHeading = true;
+let afterBlank = true;
+let prev = '';
 const flush = () => { if (paragraph) out.push(paragraph); paragraph = ''; };
 const heading = text => { flush(); out.push(text); previousWasHeading = true; };
 for (let i = 0; i < lines.length; i++) {
   const line = lines[i];
   const next = lines[i + 1] || '';
-  const prev = i > 0 ? lines[i - 1] : '';
-  if (line === '') { flush(); continue; }
+  if (line === '') {
+    // Page or paragraph break: ends the paragraph only if its last sentence is finished.
+    if (endsSentence(paragraph)) flush();
+    afterBlank = true;
+    continue;
+  }
   const md = line.match(markdownHeading);
   const namedMatch = named.find(n => n.re.test(line));
   const num = line.match(numbered);
@@ -362,18 +379,22 @@ for (let i = 0; i < lines.length; i++) {
     const useNext = !inlineTitle && next.length > 0 && next.length < 200 && !paragraphStart.test(next) && !named.some(n => n.re.test(next));
     heading(namedMatch.level + line + (useNext ? ' - ' + next : ''));
     if (useNext) i++;
-  } else if (num && !/[.,;:]$/.test(line) && followedByText(i) && afterBreak(prev, previousWasHeading)) {
+  } else if (!verse && num && !/[.,;:]$/.test(line) && followedByText(i) && afterBreak(prev, previousWasHeading)) {
     heading((num[1].includes('.') ? '### ' : '## ') + line);
-  } else if (looksLikeTitle(line) && followedByText(i) && afterBreak(prev, previousWasHeading) && !paragraphStart.test(line)) {
+  } else if (!verse && looksLikeTitle(line) && followedByText(i) && afterBreak(prev, previousWasHeading) && !paragraphStart.test(line)) {
+    heading('## ' + line);
+  } else if (verse && afterBlank && looksLikeTitle(line) && startsSentence(next) && (endsSentence(paragraph) || paragraph.length < 80)) {
     heading('## ' + line);
   } else if (paragraphStart.test(line) || paragraph === '') {
     flush();
     paragraph = line;
     previousWasHeading = false;
   } else {
-    paragraph += ' ' + line;
+    paragraph += (verse ? '\\n' : ' ') + line;
     previousWasHeading = false;
   }
+  prev = line;
+  afterBlank = false;
 }
 flush();
 // Outline (chapters and sections) kept for the questions about the document itself.
@@ -447,7 +468,7 @@ function rebalance(a, b) {
   if (joined.length <= cfg.maxChunkSize) return [joined];
   const middle = Math.floor(joined.length / 2);
   let cut = -1;
-  for (const sep of ['\\n\\n', '. ', ' ']) {
+  for (const sep of ['\\n# ', '\\n## ', '\\n### ', '\\n\\n', '. ', ' ']) {
     const before = joined.lastIndexOf(sep, middle);
     const after = joined.indexOf(sep, middle);
     const best = [before, after].filter(x => x > 0).sort((x, y) => Math.abs(x - middle) - Math.abs(y - middle))[0];
@@ -481,7 +502,9 @@ return limited.map((chunk, i) => {
     path[h.level] = h.title;
     for (let l = h.level + 1; l <= 3; l++) delete path[l];
   }
-  const inside = (chunk.match(/^### .+$/gm) || []).map(h => h.slice(4, 60)).filter(h => !String(path[3] || '').startsWith(h));
+  const current = [path[1], path[2], path[3]].filter(Boolean);
+  const inside = (chunk.match(/^#{1,3} .+$/gm) || []).map(h => h.replace(/^#+ /, '').slice(0, 60))
+    .filter(h => !current.some(c => c.startsWith(h)));
   const section = [path[1], path[2], path[3]].filter(Boolean).join(' > ') + (inside.length ? ' | contient : ' + inside.slice(0, 6).join(' ; ') + (inside.length > 6 ? ' ; …' : '') : '');
   const articles = [...chunk.matchAll(/^### Article (premier|\\d+)/gm)].map(a => (a[1] === 'premier' ? '1' : a[1]));
   if (path[3] && /^Article (premier|\\d+)/.test(path[3])) articles.unshift(path[3].match(/^Article (premier|\\d+)/)[1].replace('premier', '1'));
