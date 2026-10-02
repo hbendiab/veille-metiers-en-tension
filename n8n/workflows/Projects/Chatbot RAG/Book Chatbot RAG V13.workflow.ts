@@ -5,13 +5,8 @@ const specs_Note = node({
   version: 1,
   config: {
     name: 'Specs Note',
-    parameters: {
-      content: '## Book Chatbot RAG V13\n\n**Goal:** chat with any non-fiction document (PDF, TXT, Markdown or HTML), one or several at a time.\n\n**Part 1 - Ingestion** (form): extraction to Markdown > Gemini analyzes the structure of each document (type, divisions, units) > adaptive structure-aware chunking (one unit per passage, size adapted to the document) > augmentation by Gemini (context, hypothetical questions, keywords, entities and relations) > vectorisation + knowledge graph (relations between entities stored in graph_relations).\n\n**Part 2 - Answering** (chat): input > context (session messages, indexed documents) > routing (document, query, keywords, article filters) > search (vectors + keywords + graph: entities of the question, one hop to their neighbours) > reranking (Gemini Flash Lite) > generation.\n\n**Models:** native Google Gemini nodes (Message a Model, no sub-node), all on Gemini 3.5 Flash Lite: about 1 second per call (pinned version, no -latest alias). Gemini embedding 2 (only remaining sub-node: n8n has no native embedding node) (vectors, up to 8192 tokens per passage).\n\n**Store:** Supabase (pgvector), tables documents and chat_messages, created once by supabase/setup.sql; graph_relations is created by Postgres - Save Graph if missing. Re-ingesting a book replaces its passages.\n\n**Errors:** failed executions are logged by the Error Handler workflow (Utils) in the table workflow_errors.\n\n**Emergency stop:** deactivate the workflow.',
-      height: 520,
-      width: 480,
-      color: 2
-    },
-    position: [-620, -460]
+    parameters: { content: '## Book Chatbot RAG V13\n\n**Objectif :** discuter avec n\'importe quel document de non-fiction (PDF, TXT, Markdown ou HTML), un ou plusieurs à la fois.\n\n**Partie 1 - Ingestion** (formulaire) : extraction et nettoyage > analyse de la structure par Gemini (type, divisions, unités) > Markdown > découpage adaptatif (un passage par unité, section ou paragraphe) > augmentation par Gemini (contexte, questions hypothétiques, mots-clés, entités, relations) > vectorisation + graphe de connaissances (graph_relations).\n\n**Partie 2 - Réponse** (chat) : entrée > contexte (messages de la session, documents indexés) > routage (document, portée, requête, mots-clés, unités, entités) > recherche (vecteurs + mots-clés + graphe, ou document entier pour une question de liste) > reranking (Gemini Flash Lite) > génération avec sources.\n\n**Modèles :** nœuds natifs Google Gemini (Message a Model, sans sous-nœud), tous sur Gemini 3.5 Flash Lite (version figée). Vecteurs : gemini-embedding-2 (seul sous-nœud restant : n8n n\'a pas de nœud natif d\'embeddings).\n\n**Stockage :** Supabase (pgvector) : tables documents, chat_messages et graph_relations. Renvoyer un document avec le même titre remplace ses passages.\n\n**Erreurs :** les exécutions en échec sont enregistrées par le workflow Error Handler (dossier Utils) dans la table workflow_errors.\n\n**Arrêt d\'urgence :** désactiver le workflow.', height: 808, width: 480, color: 2 },
+    position: [-592, -432]
   }
 });
 
@@ -20,13 +15,8 @@ const improvements_Note = node({
   version: 1,
   config: {
     name: 'Improvements Note',
-    parameters: {
-      content: '### Future improvements\n- OCR (Mistral OCR or Gemini) for scanned PDFs: the current extraction needs a PDF with a text layer.\n- Delete the old passages only after the new ones are stored.\n- Basic authentication on the form.\n- HNSW index (halfvec) if the table grows beyond a few books.',
-      height: 240,
-      width: 480,
-      color: 3
-    },
-    position: [-620, 100]
+    parameters: { content: '### Améliorations prévues\n- OCR (Mistral OCR ou Gemini) pour les PDF scannés : l\'extraction actuelle exige un PDF avec une couche de texte.\n- Supprimer les anciens passages seulement après l\'enregistrement des nouveaux (ingestion atomique).\n- Authentification sur le formulaire.\n- Index HNSW (halfvec) si la base dépasse quelques milliers de passages.', height: 220, width: 480, color: 3 },
+    position: [-624, 408]
   }
 });
 
@@ -35,8 +25,8 @@ const extraction_Group = node({
   version: 1,
   config: {
     name: 'Extraction Group',
-    parameters: { content: '## 1. Extraction\nPDF, TXT, Markdown or HTML > cleaning > Markdown (headings of chapters, sections, articles, numbered and short titles)', height: 400, width: 1560, color: 7 },
-    position: [-60, -460]
+    parameters: { content: '## 1. Extraction\nPDF, TXT, Markdown ou HTML > nettoyage > structure analysée par Gemini > Markdown (titres des divisions et des unités)', height: 400, width: 1560, color: 7 },
+    position: [-64, -464]
   }
 });
 
@@ -45,8 +35,8 @@ const chunking_Group = node({
   version: 1,
   config: {
     name: 'Chunking Group',
-    parameters: { content: '## 2. Chunking\nAdaptive, structure-aware: one passage per unit (article, fable…), section or paragraph; short neighbours merged, long units split; at most maxPassages per document', height: 400, width: 260, color: 7 },
-    position: [1520, -460]
+    parameters: { content: '## 2. Découpage\nAdaptatif selon la structure : un passage par unité (article, fable…), section ou paragraphe', height: 400, width: 260, color: 7 },
+    position: [1520, -464]
   }
 });
 
@@ -55,8 +45,8 @@ const augmentation_Group = node({
   version: 1,
   config: {
     name: 'Augmentation Group',
-    parameters: { content: '## 3. Augmentation\nContext, hypothetical questions, keywords, entities and relations: one Gemini call per batch of 8 passages', height: 560, width: 840, color: 7 },
-    position: [1800, -460]
+    parameters: { content: '## 3. Augmentation\nContexte, questions hypothétiques, mots-clés, entités et relations : un appel Gemini par lot de 16 passages', height: 560, width: 840, color: 7 },
+    position: [1808, -464]
   }
 });
 
@@ -65,8 +55,8 @@ const vectorisation_Group = node({
   version: 1,
   config: {
     name: 'Vectorisation Group',
-    parameters: { content: '## 4. Vectorisation + Graph\nGemini embeddings > Supabase, relations > graph_relations', height: 560, width: 780, color: 7 },
-    position: [2660, -460]
+    parameters: { content: '## 4. Vectorisation + graphe\nVecteurs Gemini > Supabase, relations > graph_relations', height: 560, width: 780, color: 7 },
+    position: [2672, -464]
   }
 });
 
@@ -75,8 +65,8 @@ const input_Group = node({
   version: 1,
   config: {
     name: 'Input Group',
-    parameters: { content: '## Input\nChat message and settings', height: 560, width: 680, color: 7 },
-    position: [-60, 360]
+    parameters: { content: '## Entrée\nMessage du chat et réglages', height: 560, width: 680, color: 7 },
+    position: [-64, 368]
   }
 });
 
@@ -85,8 +75,8 @@ const context_Group = node({
   version: 1,
   config: {
     name: 'Context Group',
-    parameters: { content: '## Context\nMessages of the session and indexed documents', height: 560, width: 900, color: 7 },
-    position: [640, 360]
+    parameters: { content: '## Contexte\nMessages de la session et documents indexés', height: 560, width: 900, color: 7 },
+    position: [640, 368]
   }
 });
 
@@ -95,8 +85,8 @@ const routing_Group = node({
   version: 1,
   config: {
     name: 'Routing Group',
-    parameters: { content: '## Routing\nQuery, keywords, filters', height: 560, width: 680, color: 7 },
-    position: [1560, 360]
+    parameters: { content: '## Routage\nDocument, portée, requête, mots-clés, filtres', height: 560, width: 680, color: 7 },
+    position: [1568, 368]
   }
 });
 
@@ -105,8 +95,8 @@ const search_Group = node({
   version: 1,
   config: {
     name: 'Search Group',
-    parameters: { content: '## Search\nVectors + keywords + graph', height: 560, width: 680, color: 7 },
-    position: [2260, 360]
+    parameters: { content: '## Recherche\nVecteurs + mots-clés + graphe (ou document entier)', height: 560, width: 680, color: 7 },
+    position: [2272, 368]
   }
 });
 
@@ -116,7 +106,7 @@ const reranking_Group = node({
   config: {
     name: 'Reranking Group',
     parameters: { content: '## Reranking\nGemini Flash Lite', height: 560, width: 680, color: 7 },
-    position: [2960, 360]
+    position: [2960, 400]
   }
 });
 
@@ -125,8 +115,8 @@ const generation_Group = node({
   version: 1,
   config: {
     name: 'Generation Group',
-    parameters: { content: '## Generation\nAnswer with sources', height: 560, width: 680, color: 7 },
-    position: [3660, 360]
+    parameters: { content: '## Génération\nRéponse avec sources', height: 560, width: 680, color: 7 },
+    position: [3664, 368]
   }
 });
 
@@ -135,7 +125,7 @@ const extraction_guide = node({
   version: 1,
   config: {
     name: 'Extraction Guide',
-    parameters: { content: '### Nodes of this step\n- **On Form Submission**: form to upload a document (PDF, TXT, Markdown or HTML) with its title and author.\n- **Configuration - Ingestion**: all ingestion settings: passage sizes, maximum passages per document, batch size, pause.\n- **If - PDF File**: sends PDF files to the PDF extraction and the other files to the text extraction.\n- **Extract from File - PDF Text / Text**: read the text of the file (and the number of pages of a PDF).\n- **Postgres - Prepare Storage**: updates the search function, then deletes the old passages of this document (same title = new version).\n- **Clean Text**: removes page headers, footers, footnotes and hyphenation, converts HTML, and summarizes the layout for Gemini.\n- **Gemini - Analyze Structure**: finds the type of document, its divisions (book, chapter, section…) and its units (article, fable…).\n- **Convert Text to Markdown**: applies this structure as Markdown headings, then computes the outline and the statistics.', height: 276, width: 1560, color: 7 },
+    parameters: { content: '### Les nœuds de cette étape\n- **On Form Submission** : formulaire pour envoyer un document (PDF, TXT, Markdown ou HTML) avec son titre et son auteur.\n- **Configuration - Ingestion** : tous les réglages de l\'ingestion : taille des passages, nombre maximal de passages par document, taille des lots, pause.\n- **If - PDF File** : envoie les PDF vers l\'extraction PDF et les autres fichiers vers l\'extraction texte.\n- **Extract from File - PDF Text / Text** : lisent le texte du fichier (et le nombre de pages d\'un PDF).\n- **Postgres - Prepare Storage** : met à jour la fonction de recherche, puis supprime les anciens passages de ce document (même titre = nouvelle version).\n- **Clean Text** : retire en-têtes, pieds de page, notes de bas de page et césures, convertit le HTML et résume la mise en page pour Gemini.\n- **Gemini - Analyze Structure** : identifie le type de document, ses divisions (livre, chapitre, section…) et ses unités (article, fable…).\n- **Convert Text to Markdown** : applique cette structure sous forme de titres Markdown, puis calcule le plan et les statistiques.', height: 276, width: 1560, color: 7 },
     position: [-64, -764]
   }
 });
@@ -145,8 +135,8 @@ const chunking_guide = node({
   version: 1,
   config: {
     name: 'Chunking Guide',
-    parameters: { content: '### Node of this step\n- **Split Recursive Chunks**: one passage per unit (article, fable…), else per section, else per paragraph. Short neighbours of the same division are merged, long units split with overlap: 400 to 4000 characters, at most 300 passages per document.', height: 204, width: 420, color: 7 },
-    position: [1520, -692]
+    parameters: { content: '### Le nœud de cette étape\n- **Split Recursive Chunks** : un passage par unité (article, fable…), sinon par section, sinon par paragraphe. Les petites unités voisines d\'une même division sont regroupées, les longues redécoupées avec recouvrement : 400 à 4 000 caractères, 300 passages au plus par document.', height: 228, width: 420, color: 7 },
+    position: [1520, -716]
   }
 });
 
@@ -155,7 +145,7 @@ const augmentation_guide = node({
   version: 1,
   config: {
     name: 'Augmentation Guide',
-    parameters: { content: '### Nodes of this step\n- **Loop Over Passages**: processes the passages 16 at a time (Gemini quota); when all are done, goes to Ingestion Summary.\n- **Group Batch Passages**: puts the passages of the batch in a single prompt.\n- **Gemini - Augment Passages**: writes for each passage a context, 3 hypothetical questions, keywords, entities and relations.\n- **Build Augmented Passages**: splits the answer per passage and adds it as a header above the text to embed.\n- **Ingestion Summary**: final report: document, passages indexed, chunking strategy and statistics.', height: 252, width: 840, color: 7 },
+    parameters: { content: '### Les nœuds de cette étape\n- **Loop Over Passages** : traite les passages 16 par 16 (quota Gemini) ; quand tout est fait, passe à Ingestion Summary.\n- **Group Batch Passages** : réunit les passages du lot dans une seule requête.\n- **Gemini - Augment Passages** : écrit pour chaque passage un contexte, 3 questions hypothétiques, des mots-clés, des entités et des relations.\n- **Build Augmented Passages** : répartit la réponse par passage et l\'ajoute en en-tête du texte à vectoriser.\n- **Ingestion Summary** : bilan final : document, passages indexés, stratégie de découpage et statistiques.', height: 252, width: 840, color: 7 },
     position: [1808, -740]
   }
 });
@@ -165,8 +155,8 @@ const vectorisation_guide = node({
   version: 1,
   config: {
     name: 'Vectorisation Guide',
-    parameters: { content: '### Nodes of this step\n- **Supabase Vector Store - Insert Passages**: stores each passage with its vector and its metadata in the documents table.\n- **Google Gemini - Embed Passages**: turns each passage into a vector (gemini-embedding-2, 3072 dimensions).\n- **Default Data Loader**: builds the stored document: text plus metadata (section, keywords, units…).\n- **Recursive Text Splitter - No Re-Split**: required by n8n, set so that it never cuts again (passages are already cut).\n- **Postgres - Save Graph**: saves the relations (source → relation → target) of the batch in graph_relations.\n- **Wait - Gemini Quota**: 15 s pause before the next batch.', height: 324, width: 780, color: 7 },
-    position: [2672, -812]
+    parameters: { content: '### Les nœuds de cette étape\n- **Supabase Vector Store - Insert Passages** : enregistre chaque passage avec son vecteur et ses métadonnées dans la table documents.\n- **Google Gemini - Embed Passages** : transforme chaque passage en vecteur (gemini-embedding-2, 3 072 dimensions).\n- **Default Data Loader** : prépare le document enregistré : texte et métadonnées (section, mots-clés, unités…).\n- **Recursive Text Splitter - No Re-Split** : imposé par n8n, réglé pour ne jamais recouper (les passages sont déjà découpés).\n- **Postgres - Save Graph** : enregistre les relations du lot (source → relation → cible) dans graph_relations.\n- **Wait - Gemini Quota** : pause de 15 s avant le lot suivant.', height: 348, width: 780, color: 7 },
+    position: [2672, -836]
   }
 });
 
@@ -175,7 +165,7 @@ const input_guide = node({
   version: 1,
   config: {
     name: 'Input Guide',
-    parameters: { content: '### Nodes of this step\n- **When Chat Message Received**: the question typed in the n8n chat.\n- **Configuration - Answering**: answering settings: history, number of results, reranking threshold, passages kept, full document limit.', height: 156, width: 680, color: 7 },
+    parameters: { content: '### Les nœuds de cette étape\n- **When Chat Message Received** : la question tapée dans le chat n8n.\n- **Configuration - Answering** : réglages de la réponse : historique, nombre de résultats, seuil du reranking, passages gardés, limite du document entier.', height: 156, width: 680, color: 7 },
     position: [-64, 952]
   }
 });
@@ -185,7 +175,7 @@ const context_guide = node({
   version: 1,
   config: {
     name: 'Context Guide',
-    parameters: { content: '### Nodes of this step\n- **Postgres - Get Session Messages**: last messages of this conversation.\n- **Postgres - List Documents**: indexed documents with format, pages, outline and statistics.\n- **Build Conversation**: checks the question, builds the history and the description of the documents.\n- **If - Empty Conversation**: first message: straight to the routing; follow-up: rewritten first.', height: 180, width: 900, color: 7 },
+    parameters: { content: '### Les nœuds de cette étape\n- **Postgres - Get Session Messages** : derniers messages de cette conversation.\n- **Postgres - List Documents** : documents indexés, avec format, pages, plan et statistiques.\n- **Build Conversation** : vérifie la question, prépare l\'historique et la description des documents.\n- **If - Empty Conversation** : premier message : directement au routage ; question de suite : d\'abord reformulée.', height: 180, width: 900, color: 7 },
     position: [640, 952]
   }
 });
@@ -195,7 +185,7 @@ const routing_guide = node({
   version: 1,
   config: {
     name: 'Routing Guide',
-    parameters: { content: '### Nodes of this step\n- **Gemini - Rewrite with History**: rewrites a follow-up question so that it is understandable on its own.\n- **Gemini - Route Question**: chooses the document and the scope (passage, list, document), writes the search query, keywords, units and entities.\n- **Parse Routing**: checks this plan; the question itself is used if Gemini did not return valid JSON.', height: 228, width: 680, color: 7 },
+    parameters: { content: '### Les nœuds de cette étape\n- **Gemini - Rewrite with History** : reformule une question de suite pour qu\'elle se comprenne seule.\n- **Gemini - Route Question** : choisit le document et la portée (passage, liste, document), écrit la requête de recherche, les mots-clés, les unités et les entités.\n- **Parse Routing** : vérifie ce plan ; la question elle-même sert de repli si Gemini n\'a pas renvoyé un JSON valide.', height: 228, width: 680, color: 7 },
     position: [1568, 952]
   }
 });
@@ -205,7 +195,7 @@ const search_guide = node({
   version: 1,
   config: {
     name: 'Search Guide',
-    parameters: { content: '### Nodes of this step\n- **Supabase Vector Store - Search Passages + Embed Query**: passages closest in meaning, in the chosen document.\n- **Postgres - Search by Keywords**: passages whose keywords or units (article 5…) match.\n- **Postgres - Search Graph**: relations around the entities of the question and the passages they come from.\n- **Postgres - Get Full Document**: for a list question, the whole document if it is small enough.', height: 276, width: 680, color: 7 },
+    parameters: { content: '### Les nœuds de cette étape\n- **Supabase Vector Store - Search Passages + Embed Query** : passages les plus proches par le sens, dans le document choisi.\n- **Postgres - Search by Keywords** : passages dont les mots-clés ou les unités (article 5…) correspondent.\n- **Postgres - Search Graph** : relations autour des entités de la question, et passages d\'où elles viennent.\n- **Postgres - Get Full Document** : pour une question de liste, le document entier s\'il est assez court.', height: 276, width: 680, color: 7 },
     position: [2272, 952]
   }
 });
@@ -215,7 +205,7 @@ const reranking_guide = node({
   version: 1,
   config: {
     name: 'Reranking Guide',
-    parameters: { content: '### Nodes of this step\n- **Merge Candidates**: merges the results without duplicates (or takes the whole document) and lists the graph facts.\n- **Gemini - Rerank Passages**: scores each candidate passage from 0 to 1.\n- **Select Best Passages**: keeps the 5 best (all of them for a whole document, the 2 first if all scores are 0) and states what was covered.', height: 204, width: 680, color: 7 },
+    parameters: { content: '### Les nœuds de cette étape\n- **Merge Candidates** : fusionne les résultats sans doublons (ou prend le document entier) et liste les faits du graphe.\n- **Gemini - Rerank Passages** : note chaque passage candidat de 0 à 1.\n- **Select Best Passages** : garde les 5 meilleurs (tous pour un document entier, les 2 premiers si toutes les notes valent 0) et indique ce qui a été couvert.', height: 204, width: 680, color: 7 },
     position: [2960, 984]
   }
 });
@@ -225,7 +215,7 @@ const generation_guide = node({
   version: 1,
   config: {
     name: 'Generation Guide',
-    parameters: { content: '### Nodes of this step\n- **Gemini - Generate Answer**: answers only from the passages, cites [n], says when it does not know, makes a list when asked.\n- **Postgres - Save Messages**: saves the question and the answer (history kept 30 days).\n- **Format Chat Reply**: adds only the sources cited in the answer, or a fallback message if Gemini failed.', height: 228, width: 680, color: 7 },
+    parameters: { content: '### Les nœuds de cette étape\n- **Gemini - Generate Answer** : répond uniquement à partir des passages, cite ses sources [n], dit quand il ne sait pas, fait une liste quand on la demande.\n- **Postgres - Save Messages** : enregistre la question et la réponse (historique conservé 30 jours).\n- **Format Chat Reply** : n\'ajoute que les sources citées dans la réponse, ou un message de secours si Gemini a échoué.', height: 228, width: 680, color: 7 },
     position: [3664, 952]
   }
 });
