@@ -174,14 +174,14 @@ const configuration_Ingestion = node({
           { id: 'cfg-max-chunk', name: 'maxChunkSize', value: 10000, type: 'number' },
           { id: 'cfg-max-chunks', name: 'maxChunks', value: 0, type: 'number' },
           { id: 'cfg-batch-size', name: 'passagesPerBatch', value: 8, type: 'number' },
-          { id: 'cfg-pause', name: 'pauseSeconds', value: 5, type: 'number' }
+          { id: 'cfg-pause', name: 'pauseSeconds', value: 15, type: 'number' }
         ]
       },
       includeOtherFields: true,
       options: { stripBinary: false }
     },
     position: [220, -260],
-    notes: 'Chunk sizes in characters (5000 to 10000, overlap 800). maxChunks = 0 means the whole book. Passages are augmented (one Gemini call) and embedded 8 at a time, with a short pause (free Gemini quota).',
+    notes: 'Chunk sizes in characters (5000 to 10000, overlap 800). maxChunks = 0 means the whole book. Passages are augmented (one Gemini call) and embedded 8 at a time, with a 15 s pause: the free Gemini tier also limits tokens per minute.',
     notesInFlow: true
   }
 });
@@ -618,7 +618,14 @@ const clean = (v, max, length) => (Array.isArray(v) ? v : [])
 const byNumber = {};
 try {
   const raw = replyText($input.first().json).replace(/\`\`\`(json)?/g, '');
-  const parsed = JSON.parse(raw.slice(Math.min(...['{', '['].map(c => raw.indexOf(c)).filter(x => x >= 0)), Math.max(raw.lastIndexOf('}'), raw.lastIndexOf(']')) + 1));
+  const body = raw.slice(Math.min(...['{', '['].map(c => raw.indexOf(c)).filter(x => x >= 0)), Math.max(raw.lastIndexOf('}'), raw.lastIndexOf(']')) + 1);
+  let parsed;
+  try {
+    parsed = JSON.parse(body);
+  } catch (e) {
+    // Repairs a key whose opening quote was replaced by another character, e.g. -hypotheticalQueries": [...]
+    parsed = JSON.parse(body.replace(/([{,]\\s*)[-'\`]?([A-Za-z]+)"\\s*:/g, '$1"$2":'));
+  }
   for (const r of Array.isArray(parsed) ? parsed : parsed.passages || []) byNumber[Number(r.n)] = r;
 } catch (e) {
   // byNumber stays empty: fallback for every passage below

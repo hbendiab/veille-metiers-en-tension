@@ -100,7 +100,7 @@ Choix principaux :
 - **Réglages** : regroupés dans deux nœuds *Configuration*, un en tête de chaque partie (taille des chunks, overlap, nombre de résultats, seuil de reranking, mode test avec `maxChunks`).
 - **Quota Gemini gratuit** :
   - 1000 embeddings par jour et par modèle (vérifié : `EmbedContentRequestsPerDayPerProjectPerModel-FreeTier = 1000`) ;
-  - augmentation et vectorisation par paquets de 8 passages avec 5 s de pause. Si l'API renvoie 429, il faut augmenter `pauseSeconds`.
+  - augmentation et vectorisation par paquets de 8 passages, avec **15 s de pause**. La version gratuite limite aussi les tokens par minute : avec 5 s de pause, le Code pénal (408 pages, 143 passages) échouait au 7e paquet. Si l'API renvoie encore 429, il faut augmenter `pauseSeconds`.
   - Si le quota est dépassé, l'API renvoie 429 et LangChain produit des vecteurs vides (« vector must have at least 1 dimension »).
 - **Garde-fous** :
   - réponse limitée aux passages du livre ;
